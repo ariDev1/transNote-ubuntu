@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import {execFile} from 'node:child_process';
-import {mkdir, rm} from 'node:fs/promises';
+import {mkdir, readFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {promisify} from 'node:util';
 import {createRequire} from 'node:module';
@@ -553,6 +553,40 @@ async function attachmentSave(dataDir, config) {
   };
 }
 
+async function attachmentCopyText(dataDir, config) {
+  const input = await readStdinJson();
+
+  const target = await resolveAttachmentActionTarget(
+    dataDir,
+    config,
+    input.noteId,
+    input.attachmentId
+  );
+
+  if (target.attachment.kind !== 'text') {
+    throw helperError(
+      'ATTACHMENT_NOT_TEXT',
+      'only text attachments can be copied as text'
+    );
+  }
+
+  let value;
+  try {
+    value = await readFile(target.path, 'utf8');
+  } catch {
+    throw helperError(
+      'ATTACHMENT_READ_FAILED',
+      'could not read attachment'
+    );
+  }
+
+  return {
+    ok: true,
+    text: value,
+  };
+}
+
+
 async function noteShare(dataDir, config) {
   const input = await readStdinJson();
   const id = Store.normalizeText(input.id);
@@ -787,6 +821,8 @@ try {
     result = await attachmentOpen(dataDir, config);
   else if (command === 'attachment-save')
     result = await attachmentSave(dataDir, config);
+  else if (command === 'attachment-copy-text')
+    result = await attachmentCopyText(dataDir, config);
   else if (command === 'note-delete')
     result = await noteDelete(dataDir, config);
   else if (command === 'sync-now')

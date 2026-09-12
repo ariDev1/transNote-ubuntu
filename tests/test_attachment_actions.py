@@ -382,5 +382,138 @@ class AttachmentActionTests(unittest.TestCase):
             )
 
 
+    def test_copy_verified_text_returns_exact_content(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data_dir = root / "data"
+            sync_dir = root / "sync"
+            home = root / "home"
+            sync_dir.mkdir()
+            home.mkdir()
+
+            payload = b"copy this text\n"
+            peer_snapshot(sync_dir, payload)
+
+            result = run_helper(
+                "attachment-copy-text",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+                home=home,
+                input_value={
+                    "noteId": "peer-note",
+                    "attachmentId": "peer-att",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+            value = json.loads(result.stdout)
+            self.assertEqual(
+                value["text"],
+                "copy this text\n",
+            )
+
+    def test_copy_rejects_unverified_peer_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data_dir = root / "data"
+            sync_dir = root / "sync"
+            home = root / "home"
+            sync_dir.mkdir()
+            home.mkdir()
+
+            peer_snapshot(
+                sync_dir,
+                b"wrong bytes\n",
+                bad_hash=True,
+            )
+
+            result = run_helper(
+                "attachment-copy-text",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+                home=home,
+                input_value={
+                    "noteId": "peer-note",
+                    "attachmentId": "peer-att",
+                },
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+
+            error = json.loads(result.stderr)
+            self.assertEqual(
+                error["error"]["code"],
+                "ATTACHMENT_NOT_VERIFIED",
+            )
+
+
+    def test_copy_rejects_non_text_attachment(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data_dir = root / "data"
+            sync_dir = root / "sync"
+            home = root / "home"
+            sync_dir.mkdir()
+            home.mkdir()
+
+            payload = b"\x00\x01\x02\x03"
+            sha256 = hashlib.sha256(payload).hexdigest()
+
+            snapshot = {
+                "version": 1,
+                "deviceId": "laptop",
+                "notes": [{
+                    "id": "peer-note",
+                    "title": "Peer",
+                    "body": "body",
+                    "author": "laptop",
+                    "createdAt": "2026-09-12T12:00:00.000Z",
+                    "updatedAt": "2026-09-12T12:00:00.000Z",
+                    "shared": True,
+                    "comments": [],
+                    "attachments": [{
+                        "id": "peer-att",
+                        "name": "data.dat",
+                        "size": len(payload),
+                        "sha256": sha256,
+                    }],
+                }],
+                "noteComments": [],
+            }
+
+            (sync_dir / "laptop.json").write_text(
+                json.dumps(snapshot)
+            )
+
+            sidecar = (
+                sync_dir /
+                ".attachments" /
+                "peer-note" /
+                "peer-att-data.dat"
+            )
+            sidecar.parent.mkdir(parents=True)
+            sidecar.write_bytes(payload)
+
+            result = run_helper(
+                "attachment-copy-text",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+                home=home,
+                input_value={
+                    "noteId": "peer-note",
+                    "attachmentId": "peer-att",
+                },
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+
+            error = json.loads(result.stderr)
+            self.assertEqual(
+                error["error"]["code"],
+                "ATTACHMENT_NOT_TEXT",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

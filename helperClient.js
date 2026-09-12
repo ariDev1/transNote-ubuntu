@@ -16,6 +16,7 @@ const COMMANDS = new Set([
   'attachment-add-dialog',
   'attachment-open',
   'attachment-save',
+  'attachment-copy-text',
   'sync-now',
   'folder-create',
   'lan-prepare',
@@ -176,6 +177,20 @@ export class HelperClient {
       {noteId, attachmentId},
       cancellable
     );
+  }
+
+  async copyAttachmentText(
+    noteId,
+    attachmentId,
+    cancellable = null
+  ) {
+    const result = await this._run(
+      'attachment-copy-text',
+      {noteId, attachmentId},
+      cancellable
+    );
+
+    return String(result.text ?? '');
   }
 
   async syncNow(cancellable = null) {

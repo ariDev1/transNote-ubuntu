@@ -527,6 +527,26 @@ export class NotesMenuView {
 
           row.add_child(name);
           row.add_child(stateLabel);
+
+          if (usable && attachment.kind === 'text') {
+            const copyAttachmentButton = new St.Button({
+              label: 'Copy',
+              can_focus: true,
+              reactive: true,
+              style_class: 'button transnote-attachment-action',
+            });
+
+            copyAttachmentButton.connect(
+              'clicked',
+              () => this._copyAttachmentText(
+                note.id,
+                attachment.id
+              )
+            );
+
+            row.add_child(copyAttachmentButton);
+          }
+
           row.add_child(saveButton);
           row.add_child(openButton);
 
@@ -613,6 +633,36 @@ export class NotesMenuView {
 
       this._status.text = 'Attachment added.';
       await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _copyAttachmentText(noteId, attachmentId) {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    this._status.text = 'Copying attachment…';
+
+    try {
+      const value = await this._helper.copyAttachmentText(
+        noteId,
+        attachmentId,
+        this._cancellable
+      );
+
+      if (this._destroyed)
+        return;
+
+      this._clipboard.set_text(
+        St.ClipboardType.CLIPBOARD,
+        value
+      );
+      this._status.text = 'Attachment copied.';
     } catch (error) {
       if (!this._destroyed && !this._cancellable.is_cancelled())
         this._status.text = `Error: ${error.message}`;

@@ -152,12 +152,14 @@ console.log(JSON.stringify(result));
             "attachment-add-dialog",
             "attachment-open",
             "attachment-save",
+            "attachment-copy-text",
         ):
             self.assertIn(f"'{command}'", source)
 
         self.assertIn("async addAttachment(", source)
         self.assertIn("async openAttachment(", source)
         self.assertIn("async saveAttachment(", source)
+        self.assertIn("async copyAttachmentText(", source)
 
     def test_notes_menu_wires_attachment_ui(self):
         menu = (ROOT / "notesMenu.js").read_text()
@@ -181,6 +183,14 @@ console.log(JSON.stringify(result));
         )
         self.assertIn(
             "this._helper.saveAttachment(",
+            menu,
+        )
+        self.assertIn(
+            "this._helper.copyAttachmentText(",
+            menu,
+        )
+        self.assertIn(
+            "_copyAttachmentText(",
             menu,
         )
 

@@ -11,6 +11,7 @@ import {
   writeSnapshot,
 } from './folder-sync.mjs';
 import {
+  inspectReceivedAttachment,
   mirrorAttachment,
   mirrorSharedAttachments,
   stageAttachment,
@@ -132,10 +133,38 @@ async function notesList(dataDir, config) {
   const peerNotes = peers.notes.filter(note => !mine.has(note.id));
   const notes = Store.sortNotes(state.notes.concat(peerNotes));
 
+  const attachmentStates = {};
+
+  if (config.configured) {
+    for (const note of peerNotes) {
+      const attachments = Array.isArray(note.attachments)
+        ? note.attachments
+        : [];
+
+      if (attachments.length === 0)
+        continue;
+
+      const noteStates = {};
+
+      for (const attachment of attachments) {
+        const result = await inspectReceivedAttachment({
+          syncDir: config.syncDir,
+          noteId: note.id,
+          attachment,
+        });
+
+        noteStates[attachment.id] = result.state;
+      }
+
+      attachmentStates[note.id] = noteStates;
+    }
+  }
+
   return {
     ok: true,
     notes,
     localIds,
+    attachmentStates,
     diagnostics: {
       configured: config.configured,
       files: peers.diagnostics.files,

@@ -1,4 +1,14 @@
-import {resolve, sep} from 'node:path';
+import {createHash} from 'node:crypto';
+import {
+  copyFile,
+  mkdir,
+  readFile,
+} from 'node:fs/promises';
+import {
+  dirname,
+  resolve,
+  sep,
+} from 'node:path';
 
 
 function unsafePath() {
@@ -42,4 +52,37 @@ export function resolveAttachmentPath(
     throw unsafePath();
 
   return path;
+}
+
+export async function stageAttachment({
+  attachmentRoot,
+  noteId,
+  attachmentId,
+  fileName,
+  sourcePath,
+}) {
+  const path = resolveAttachmentPath(
+    attachmentRoot,
+    noteId,
+    attachmentId,
+    fileName
+  );
+
+  await mkdir(dirname(path), {
+    recursive: true,
+    mode: 0o700,
+  });
+
+  await copyFile(sourcePath, path);
+
+  const bytes = await readFile(path);
+  const sha256 = createHash('sha256')
+    .update(bytes)
+    .digest('hex');
+
+  return {
+    path,
+    size: bytes.length,
+    sha256,
+  };
 }

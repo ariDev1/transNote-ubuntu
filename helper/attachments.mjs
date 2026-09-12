@@ -226,6 +226,20 @@ export async function mirrorSharedAttachments({
   return mirrored;
 }
 
+export async function removeAttachmentNoteDirectory({
+  attachmentRoot,
+  noteId,
+}) {
+  const root = resolve(String(attachmentRoot ?? ''));
+  const note = requirePathComponent(noteId);
+  const directory = resolve(root, note);
+
+  await rm(directory, {
+    recursive: true,
+    force: true,
+  });
+}
+
 export async function inspectReceivedAttachment({
   syncDir,
   noteId,

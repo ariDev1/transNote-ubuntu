@@ -17,6 +17,7 @@ import {
   inspectStoredAttachment,
   mirrorAttachment,
   mirrorSharedAttachments,
+  removeAttachmentNoteDirectory,
   resolveAttachmentPath,
   saveAttachmentCopy,
   stageAttachment,
@@ -584,6 +585,16 @@ async function noteShare(dataDir, config) {
   state.notes = Store.sortNotes(state.notes);
   await saveState(dataDir, state);
 
+  if (
+    input.shared !== true &&
+    config.configured
+  ) {
+    await removeAttachmentNoteDirectory({
+      attachmentRoot: join(config.syncDir, '.attachments'),
+      noteId: id,
+    });
+  }
+
   if (config.configured) {
     await writeSnapshot({
       syncDir: config.syncDir,
@@ -618,7 +629,17 @@ async function noteDelete(dataDir, config) {
   state.notes = Store.sortNotes(state.notes);
   await saveState(dataDir, state);
 
+  await removeAttachmentNoteDirectory({
+    attachmentRoot: join(dataDir, 'attachments'),
+    noteId: id,
+  });
+
   if (config.configured) {
+    await removeAttachmentNoteDirectory({
+      attachmentRoot: join(config.syncDir, '.attachments'),
+      noteId: id,
+    });
+
     await writeSnapshot({
       syncDir: config.syncDir,
       deviceId: config.deviceId,

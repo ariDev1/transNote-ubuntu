@@ -335,5 +335,119 @@ class AttachmentIntegrationTests(unittest.TestCase):
             )
 
 
+    def test_unshare_removes_mirror_but_keeps_private_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data_dir = root / "data"
+            sync_dir = root / "sync"
+            sync_dir.mkdir()
+
+            source = root / "file.txt"
+            source.write_bytes(b"keep local\n")
+
+            note = self.create_note(data_dir, sync_dir)
+
+            attached = run_helper(
+                "attachment-add",
+                data_dir=data_dir,
+                device_id="desktop",
+                sync_dir=sync_dir,
+                input_value={
+                    "noteId": note["id"],
+                    "sourcePath": str(source),
+                },
+            )
+            self.assertEqual(attached.returncode, 0, msg=attached.stderr)
+            attachment = result_json(attached)["attachment"]
+
+            shared = run_helper(
+                "note-share",
+                data_dir=data_dir,
+                device_id="desktop",
+                sync_dir=sync_dir,
+                input_value={"id": note["id"], "shared": True},
+            )
+            self.assertEqual(shared.returncode, 0, msg=shared.stderr)
+
+            local = (
+                data_dir / "attachments" / note["id"] /
+                f'{attachment["id"]}-{attachment["name"]}'
+            )
+            mirror = (
+                sync_dir / ".attachments" / note["id"] /
+                f'{attachment["id"]}-{attachment["name"]}'
+            )
+
+            self.assertTrue(local.exists())
+            self.assertTrue(mirror.exists())
+
+            unshared = run_helper(
+                "note-share",
+                data_dir=data_dir,
+                device_id="desktop",
+                sync_dir=sync_dir,
+                input_value={"id": note["id"], "shared": False},
+            )
+            self.assertEqual(unshared.returncode, 0, msg=unshared.stderr)
+
+            self.assertTrue(local.exists())
+            self.assertFalse(mirror.exists())
+
+    def test_delete_removes_private_and_mirrored_attachment_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data_dir = root / "data"
+            sync_dir = root / "sync"
+            sync_dir.mkdir()
+
+            source = root / "file.txt"
+            source.write_bytes(b"delete me\n")
+
+            note = self.create_note(data_dir, sync_dir)
+
+            attached = run_helper(
+                "attachment-add",
+                data_dir=data_dir,
+                device_id="desktop",
+                sync_dir=sync_dir,
+                input_value={
+                    "noteId": note["id"],
+                    "sourcePath": str(source),
+                },
+            )
+            self.assertEqual(attached.returncode, 0, msg=attached.stderr)
+            attachment = result_json(attached)["attachment"]
+
+            shared = run_helper(
+                "note-share",
+                data_dir=data_dir,
+                device_id="desktop",
+                sync_dir=sync_dir,
+                input_value={"id": note["id"], "shared": True},
+            )
+            self.assertEqual(shared.returncode, 0, msg=shared.stderr)
+
+            local = (
+                data_dir / "attachments" / note["id"] /
+                f'{attachment["id"]}-{attachment["name"]}'
+            )
+            mirror = (
+                sync_dir / ".attachments" / note["id"] /
+                f'{attachment["id"]}-{attachment["name"]}'
+            )
+
+            deleted = run_helper(
+                "note-delete",
+                data_dir=data_dir,
+                device_id="desktop",
+                sync_dir=sync_dir,
+                input_value={"id": note["id"]},
+            )
+            self.assertEqual(deleted.returncode, 0, msg=deleted.stderr)
+
+            self.assertFalse(local.exists())
+            self.assertFalse(mirror.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

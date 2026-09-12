@@ -223,3 +223,81 @@ export async function mirrorSharedAttachments({
 
   return mirrored;
 }
+
+export async function inspectReceivedAttachment({
+  syncDir,
+  noteId,
+  attachment,
+}) {
+  const root = join(String(syncDir ?? ''), '.attachments');
+
+  try {
+    await stat(root);
+  } catch (error) {
+    if (error.code === 'ENOENT')
+      return {state: 'waiting'};
+    throw error;
+  }
+
+  const clean = Store.sanitizeAttachment(attachment);
+
+  if (!clean)
+    return {state: 'invalid'};
+
+  let path;
+  try {
+    path = resolveAttachmentPath(
+      root,
+      noteId,
+      clean.id,
+      clean.name
+    );
+  } catch {
+    return {state: 'invalid'};
+  }
+
+  let staged;
+  try {
+    staged = await stat(path);
+  } catch (error) {
+    if (error.code === 'ENOENT')
+      return {state: 'missing'};
+    throw error;
+  }
+
+  if (
+    staged.size < 0 ||
+    staged.size > Store.MAX_ATTACHMENT_BYTES ||
+    staged.size !== clean.size
+  ) {
+    return {
+      state: 'invalid',
+      path,
+    };
+  }
+
+  const bytes = await readFile(path);
+
+  if (bytes.length !== clean.size) {
+    return {
+      state: 'invalid',
+      path,
+    };
+  }
+
+  const sha256 = createHash('sha256')
+    .update(bytes)
+    .digest('hex');
+
+  if (sha256 !== clean.sha256) {
+    return {
+      state: 'invalid',
+      path,
+    };
+  }
+
+  return {
+    state: 'verified',
+    path,
+  };
+}

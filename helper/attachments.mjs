@@ -4,6 +4,7 @@ import {
   copyFile,
   mkdir,
   readFile,
+  rm,
   stat,
 } from 'node:fs/promises';
 import {
@@ -59,6 +60,35 @@ export function resolveAttachmentPath(
   return path;
 }
 
+export async function verifyStagedAttachment(path) {
+  const staged = await stat(path);
+
+  if (staged.size > Store.MAX_ATTACHMENT_BYTES) {
+    await rm(path, {force: true});
+
+    const error = new Error('attachment exceeds maximum size');
+    error.code = 'ATTACHMENT_TOO_LARGE';
+    throw error;
+  }
+
+  const bytes = await readFile(path);
+
+  if (bytes.length > Store.MAX_ATTACHMENT_BYTES) {
+    await rm(path, {force: true});
+
+    const error = new Error('attachment exceeds maximum size');
+    error.code = 'ATTACHMENT_TOO_LARGE';
+    throw error;
+  }
+
+  return {
+    size: bytes.length,
+    sha256: createHash('sha256')
+      .update(bytes)
+      .digest('hex'),
+  };
+}
+
 export async function stageAttachment({
   attachmentRoot,
   noteId,
@@ -93,14 +123,11 @@ export async function stageAttachment({
 
   await copyFile(sourcePath, path);
 
-  const bytes = await readFile(path);
-  const sha256 = createHash('sha256')
-    .update(bytes)
-    .digest('hex');
+  const verified = await verifyStagedAttachment(path);
 
   return {
     path,
-    size: bytes.length,
-    sha256,
+    size: verified.size,
+    sha256: verified.sha256,
   };
 }

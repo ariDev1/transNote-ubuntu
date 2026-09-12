@@ -261,5 +261,55 @@ console.log(result.path);
             )
 
 
+    def test_post_copy_verification_removes_oversized_staged_file(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp:
+            staged = Path(temp) / "staged.bin"
+
+            script = f"""
+import {{open}} from 'node:fs/promises';
+import {{createRequire}} from 'node:module';
+import {{verifyStagedAttachment}} from './helper/attachments.mjs';
+
+const require = createRequire(import.meta.url);
+const Store = require('./core/Store.js');
+
+const path = {json.dumps(str(staged))};
+
+const handle = await open(path, 'w');
+await handle.truncate(Store.MAX_ATTACHMENT_BYTES + 1);
+await handle.close();
+
+try {{
+  await verifyStagedAttachment(path);
+  console.log('NO_ERROR');
+}} catch (error) {{
+  console.log(error.code || error.message);
+}}
+"""
+
+            result = subprocess.run(
+                [
+                    'node',
+                    '--input-type=module',
+                    '--eval',
+                    script,
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertEqual(
+                result.stdout.strip(),
+                'ATTACHMENT_TOO_LARGE',
+            )
+            self.assertFalse(staged.exists())
+
+
 if __name__ == '__main__':
     unittest.main()

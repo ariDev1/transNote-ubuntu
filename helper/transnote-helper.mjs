@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import {mkdir} from 'node:fs/promises';
+import {mkdir, rm} from 'node:fs/promises';
+import {join} from 'node:path';
 import {createRequire} from 'node:module';
 import {hostname} from 'node:os';
 
@@ -9,6 +10,11 @@ import {
   readPeerSnapshots,
   writeSnapshot,
 } from './folder-sync.mjs';
+import {
+  mirrorAttachment,
+  mirrorSharedAttachments,
+  stageAttachment,
+} from './attachments.mjs';
 import {loadState, resolveDataDir, saveState} from './storage.mjs';
 import {decodePairingCode, loadLanPeers, saveLanPeer} from './lan-pairing.mjs';
 import {createExecFileRunner, createSyncthingControl} from './syncthing-control.mjs';
@@ -160,6 +166,111 @@ async function noteCreate(dataDir, config) {
   };
 }
 
+async function attachmentAdd(dataDir, config) {
+  const input = await readStdinJson();
+  const noteId = Store.normalizeText(input.noteId);
+  const sourcePath = Store.normalizeText(input.sourcePath);
+
+  if (noteId === '' || sourcePath === '')
+    throw helperError('BAD_INPUT', 'note id and source path are required');
+
+  const state = await loadState(dataDir);
+  const note = state.notes.find(value => value && value.id === noteId);
+
+  if (!note)
+    throw helperError('NOTE_NOT_FOUND', 'local note was not found');
+
+  if (
+    config.deviceId === '' ||
+    note.author !== config.deviceId
+  ) {
+    throw helperError(
+      'NOT_OWNER',
+      'only the note author can add attachments'
+    );
+  }
+
+  if (note.shared === true && !config.configured) {
+    throw helperError(
+      'SYNC_NOT_CONFIGURED',
+      'shared note attachments require folder sync'
+    );
+  }
+
+  const fileName = Store.sanitizeFileName(sourcePath);
+
+  if (fileName === '')
+    throw helperError('BAD_INPUT', 'attachment filename is not usable');
+
+  const attachmentId = Store.uid('att');
+
+  const staged = await stageAttachment({
+    attachmentRoot: join(dataDir, 'attachments'),
+    noteId,
+    attachmentId,
+    fileName,
+    sourcePath,
+  });
+
+  const attachment = Store.createAttachment(
+    fileName,
+    staged.size,
+    staged.sha256,
+    attachmentId
+  );
+
+  if (!attachment) {
+    await rm(staged.path, {force: true});
+    throw helperError(
+      'ATTACHMENT_INVALID',
+      'attachment metadata is invalid'
+    );
+  }
+
+  try {
+    if (note.shared === true) {
+      await mirrorAttachment({
+        dataDir,
+        syncDir: config.syncDir,
+        noteId,
+        attachment,
+      });
+    }
+
+    note.attachments = (
+      Array.isArray(note.attachments)
+        ? note.attachments
+        : []
+    ).concat([attachment]);
+
+    note.updatedAt = Store.nowIso();
+
+    state.version = 1;
+    state.deviceId = config.deviceId;
+    state.notes = Store.sortNotes(state.notes);
+
+    await saveState(dataDir, state);
+
+    if (note.shared === true) {
+      await writeSnapshot({
+        syncDir: config.syncDir,
+        deviceId: config.deviceId,
+        notes: state.notes,
+        outbox: state.outbox,
+      });
+    }
+  } catch (error) {
+    await rm(staged.path, {force: true});
+    throw error;
+  }
+
+  return {
+    ok: true,
+    note,
+    attachment,
+  };
+}
+
 async function noteShare(dataDir, config) {
   const input = await readStdinJson();
   const id = Store.normalizeText(input.id);
@@ -175,6 +286,17 @@ async function noteShare(dataDir, config) {
 
   if (!Store.setShared(note, input.shared === true, config.deviceId))
     throw helperError('NOT_OWNER', 'only the note author can change sharing');
+
+  if (
+    input.shared === true &&
+    config.configured
+  ) {
+    await mirrorSharedAttachments({
+      dataDir,
+      syncDir: config.syncDir,
+      note,
+    });
+  }
 
   state.version = 1;
   state.deviceId = config.deviceId;
@@ -355,6 +477,8 @@ try {
     result = await noteCreate(dataDir, config);
   else if (command === 'note-share')
     result = await noteShare(dataDir, config);
+  else if (command === 'attachment-add')
+    result = await attachmentAdd(dataDir, config);
   else if (command === 'note-delete')
     result = await noteDelete(dataDir, config);
   else if (command === 'sync-now')

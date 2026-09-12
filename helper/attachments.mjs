@@ -10,6 +10,7 @@ import {
 } from 'node:fs/promises';
 import {
   dirname,
+  join,
   resolve,
   sep,
 } from 'node:path';
@@ -132,4 +133,93 @@ export async function stageAttachment({
     size: verified.size,
     sha256: verified.sha256,
   };
+}
+
+function invalidAttachment(message = 'attachment metadata or bytes are invalid') {
+  const error = new Error(message);
+  error.code = 'ATTACHMENT_INVALID';
+  return error;
+}
+
+export async function mirrorAttachment({
+  dataDir,
+  syncDir,
+  noteId,
+  attachment,
+}) {
+  const clean = Store.sanitizeAttachment(attachment);
+
+  if (!clean)
+    throw invalidAttachment();
+
+  const source = resolveAttachmentPath(
+    join(dataDir, 'attachments'),
+    noteId,
+    clean.id,
+    clean.name
+  );
+
+  const sourceVerified = await verifyStagedAttachment(source);
+
+  if (
+    sourceVerified.size !== clean.size ||
+    sourceVerified.sha256 !== clean.sha256
+  ) {
+    throw invalidAttachment(
+      'private attachment bytes do not match metadata'
+    );
+  }
+
+  const target = resolveAttachmentPath(
+    join(syncDir, '.attachments'),
+    noteId,
+    clean.id,
+    clean.name
+  );
+
+  await mkdir(dirname(target), {
+    recursive: true,
+    mode: 0o700,
+  });
+
+  await copyFile(source, target);
+  await chmod(target, 0o600);
+
+  const targetVerified = await verifyStagedAttachment(target);
+
+  if (
+    targetVerified.size !== clean.size ||
+    targetVerified.sha256 !== clean.sha256
+  ) {
+    await rm(target, {force: true});
+    throw invalidAttachment(
+      'mirrored attachment bytes do not match metadata'
+    );
+  }
+
+  return target;
+}
+
+export async function mirrorSharedAttachments({
+  dataDir,
+  syncDir,
+  note,
+}) {
+  const clean = Store.sanitizeNote(note);
+
+  if (!clean || clean.shared !== true)
+    return [];
+
+  const mirrored = [];
+
+  for (const attachment of clean.attachments) {
+    mirrored.push(await mirrorAttachment({
+      dataDir,
+      syncDir,
+      noteId: clean.id,
+      attachment,
+    }));
+  }
+
+  return mirrored;
 }

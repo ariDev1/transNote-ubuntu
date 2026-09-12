@@ -116,3 +116,25 @@
 .transnote-pending-label {
   font-size: 0.9em;
 }
+
+.transnote-attachments {
+  spacing: 4px;
+  margin-top: 6px;
+}
+
+.transnote-attachment-row {
+  spacing: 6px;
+}
+
+.transnote-attachment-name {
+  font-size: 0.9em;
+}
+
+.transnote-attachment-state {
+  font-size: 0.85em;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.transnote-attachment-action {
+  padding: 2px 7px;
+}

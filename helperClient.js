@@ -13,6 +13,9 @@ const COMMANDS = new Set([
   'note-create',
   'note-share',
   'note-delete',
+  'attachment-add-dialog',
+  'attachment-open',
+  'attachment-save',
   'sync-now',
   'folder-create',
   'lan-prepare',
@@ -147,6 +150,30 @@ export class HelperClient {
     return this._run(
       'note-delete',
       {id},
+      cancellable
+    );
+  }
+
+  async addAttachment(noteId, cancellable = null) {
+    return this._run(
+      'attachment-add-dialog',
+      {noteId},
+      cancellable
+    );
+  }
+
+  async openAttachment(noteId, attachmentId, cancellable = null) {
+    return this._run(
+      'attachment-open',
+      {noteId, attachmentId},
+      cancellable
+    );
+  }
+
+  async saveAttachment(noteId, attachmentId, cancellable = null) {
+    return this._run(
+      'attachment-save',
+      {noteId, attachmentId},
       cancellable
     );
   }

@@ -3,6 +3,11 @@ import Pango from 'gi://Pango';
 import St from 'gi://St';
 
 import {addQualifiedPeer, operatorLanErrorMessage} from './lanUiModel.js';
+import {
+  attachmentStateFor,
+  attachmentStateLabel,
+  canUseAttachment,
+} from './attachmentUiModel.js';
 
 const POLL_SECONDS = 15;
 
@@ -358,7 +363,14 @@ export class NotesMenuView {
         Array.isArray(result.localIds) ? result.localIds : []
       );
       this._diagnosticState = result.diagnostics || null;
-      this._renderNotes(notes);
+
+      const attachmentStates =
+        result.attachmentStates &&
+        typeof result.attachmentStates === 'object'
+          ? result.attachmentStates
+          : {};
+
+      this._renderNotes(notes, attachmentStates);
       this._updateDiagnostics(this._diagnosticState);
       this._status.text = `${notes.length} note${notes.length === 1 ? '' : 's'}`;
     } catch (error) {
@@ -374,7 +386,7 @@ export class NotesMenuView {
     }
   }
 
-  _renderNotes(notes) {
+  _renderNotes(notes, attachmentStates = {}) {
     for (const child of this._notesBox.get_children())
       child.destroy();
 
@@ -448,6 +460,82 @@ export class NotesMenuView {
 
       box.add_child(body);
 
+      const attachments = Array.isArray(note.attachments)
+        ? note.attachments
+        : [];
+
+      if (attachments.length > 0) {
+        const attachmentBox = new St.BoxLayout({
+          vertical: true,
+          style_class: 'transnote-attachments',
+        });
+
+        for (const attachment of attachments) {
+          const state = attachmentStateFor({
+            isLocal,
+            noteId: note.id,
+            attachmentId: attachment.id,
+            attachmentStates,
+          });
+
+          const usable = canUseAttachment(state);
+
+          const row = new St.BoxLayout({
+            style_class: 'transnote-attachment-row',
+          });
+
+          const name = new St.Label({
+            text: String(attachment.name || 'attachment'),
+            x_expand: true,
+            style_class: 'transnote-attachment-name',
+          });
+
+          const stateLabel = new St.Label({
+            text: attachmentStateLabel(state),
+            style_class: 'transnote-attachment-state',
+          });
+
+          const saveButton = new St.Button({
+            label: 'Save',
+            can_focus: usable,
+            reactive: usable,
+            style_class: 'button transnote-attachment-action',
+          });
+
+          saveButton.connect(
+            'clicked',
+            () => this._saveAttachment(
+              note.id,
+              attachment.id
+            )
+          );
+
+          const openButton = new St.Button({
+            label: 'Open',
+            can_focus: usable,
+            reactive: usable,
+            style_class: 'button transnote-attachment-action',
+          });
+
+          openButton.connect(
+            'clicked',
+            () => this._openAttachment(
+              note.id,
+              attachment.id
+            )
+          );
+
+          row.add_child(name);
+          row.add_child(stateLabel);
+          row.add_child(saveButton);
+          row.add_child(openButton);
+
+          attachmentBox.add_child(row);
+        }
+
+        box.add_child(attachmentBox);
+      }
+
       const actions = new St.BoxLayout({
         style_class: 'transnote-note-actions',
       });
@@ -460,6 +548,22 @@ export class NotesMenuView {
       });
       copyButton.connect('clicked', () => this._copyNote(note));
       actions.add_child(copyButton);
+
+      if (canShare) {
+        const attachButton = new St.Button({
+          label: 'Attach',
+          can_focus: true,
+          reactive: true,
+          style_class: 'button transnote-note-action',
+        });
+
+        attachButton.connect(
+          'clicked',
+          () => this._attachFile(note.id)
+        );
+
+        actions.add_child(attachButton);
+      }
 
       if (isLocal) {
         const deleteButton = new St.Button({
@@ -484,6 +588,86 @@ export class NotesMenuView {
     const text = String(note.body ?? '').replace(/\r\n/g, '\n');
     this._clipboard.set_text(St.ClipboardType.CLIPBOARD, text);
     this._status.text = 'Copied.';
+  }
+
+  async _attachFile(noteId) {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    this._status.text = 'Selecting attachment…';
+
+    try {
+      const result = await this._helper.addAttachment(
+        noteId,
+        this._cancellable
+      );
+
+      if (this._destroyed)
+        return;
+
+      if (result.cancelled === true) {
+        this._status.text = 'Attachment selection cancelled.';
+        return;
+      }
+
+      this._status.text = 'Attachment added.';
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _openAttachment(noteId, attachmentId) {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    this._status.text = 'Opening attachment…';
+
+    try {
+      await this._helper.openAttachment(
+        noteId,
+        attachmentId,
+        this._cancellable
+      );
+
+      if (!this._destroyed)
+        this._status.text = 'Attachment opened.';
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _saveAttachment(noteId, attachmentId) {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    this._status.text = 'Saving attachment…';
+
+    try {
+      const result = await this._helper.saveAttachment(
+        noteId,
+        attachmentId,
+        this._cancellable
+      );
+
+      if (!this._destroyed)
+        this._status.text =
+          `Saved: ${String(result.savedPath || '')}`;
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
   }
 
   async _deleteNote(noteId) {

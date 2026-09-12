@@ -1,14 +1,19 @@
 import {createHash} from 'node:crypto';
+import {createRequire} from 'node:module';
 import {
   copyFile,
   mkdir,
   readFile,
+  stat,
 } from 'node:fs/promises';
 import {
   dirname,
   resolve,
   sep,
 } from 'node:path';
+
+const require = createRequire(import.meta.url);
+const Store = require('../core/Store.js');
 
 
 function unsafePath() {
@@ -67,6 +72,14 @@ export async function stageAttachment({
     attachmentId,
     fileName
   );
+
+  const source = await stat(sourcePath);
+
+  if (source.size > Store.MAX_ATTACHMENT_BYTES) {
+    const error = new Error('attachment exceeds maximum size');
+    error.code = 'ATTACHMENT_TOO_LARGE';
+    throw error;
+  }
 
   await mkdir(dirname(path), {
     recursive: true,

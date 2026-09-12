@@ -140,5 +140,70 @@ console.log(JSON.stringify(result));
             self.assertEqual(staged_path.read_bytes(), source_bytes)
 
 
+    def test_rejects_oversized_source_without_staged_file(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            source = temp_path / "oversized.bin"
+            root = temp_path / "attachments"
+
+            script = f"""
+import {{open}} from 'node:fs/promises';
+import {{createRequire}} from 'node:module';
+import {{stageAttachment}} from './helper/attachments.mjs';
+
+const require = createRequire(import.meta.url);
+const Store = require('./core/Store.js');
+
+const sourcePath = {json.dumps(str(source))};
+
+const handle = await open(sourcePath, 'w');
+await handle.truncate(Store.MAX_ATTACHMENT_BYTES + 1);
+await handle.close();
+
+try {{
+  await stageAttachment({{
+    attachmentRoot: {json.dumps(str(root))},
+    noteId: 'note-1',
+    attachmentId: 'att-1',
+    fileName: 'document.bin',
+    sourcePath,
+  }});
+
+  console.log('NO_ERROR');
+}} catch (error) {{
+  console.log(error.code || error.message);
+}}
+"""
+
+            result = subprocess.run(
+                [
+                    'node',
+                    '--input-type=module',
+                    '--eval',
+                    script,
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertEqual(
+                result.stdout.strip(),
+                'ATTACHMENT_TOO_LARGE',
+            )
+
+            staged_path = (
+                root /
+                'note-1' /
+                'att-1-document.bin'
+            )
+            self.assertFalse(staged_path.exists())
+
+
 if __name__ == '__main__':
     unittest.main()

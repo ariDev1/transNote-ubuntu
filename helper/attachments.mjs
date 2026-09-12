@@ -66,11 +66,16 @@ export async function stageAttachment({
   fileName,
   sourcePath,
 }) {
+  const cleanFileName = Store.sanitizeFileName(fileName);
+
+  if (cleanFileName === '')
+    throw unsafePath();
+
   const path = resolveAttachmentPath(
     attachmentRoot,
     noteId,
     attachmentId,
-    fileName
+    cleanFileName
   );
 
   const source = await stat(sourcePath);

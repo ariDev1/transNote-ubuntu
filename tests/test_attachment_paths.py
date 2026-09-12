@@ -205,5 +205,61 @@ try {{
             self.assertFalse(staged_path.exists())
 
 
+    def test_staging_uses_store_filename_sanitation(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            source = temp_path / "source.txt"
+            root = temp_path / "attachments"
+
+            source.write_bytes(b"safe content\n")
+
+            script = f"""
+import {{stageAttachment}} from './helper/attachments.mjs';
+
+const result = await stageAttachment({{
+  attachmentRoot: {json.dumps(str(root))},
+  noteId: 'note-1',
+  attachmentId: 'att-1',
+  fileName: '../../escape.txt',
+  sourcePath: {json.dumps(str(source))}
+}});
+
+console.log(result.path);
+"""
+
+            result = subprocess.run(
+                [
+                    'node',
+                    '--input-type=module',
+                    '--eval',
+                    script,
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+            expected = (
+                root /
+                'note-1' /
+                'att-1-escape.txt'
+            )
+
+            self.assertEqual(
+                Path(result.stdout.strip()),
+                expected,
+            )
+            self.assertEqual(
+                expected.read_bytes(),
+                b"safe content\n",
+            )
+
+
 if __name__ == '__main__':
     unittest.main()

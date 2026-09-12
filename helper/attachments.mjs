@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {constants as fsConstants} from 'node:fs';
 import {createRequire} from 'node:module';
 import {
   chmod,
@@ -10,6 +11,7 @@ import {
 } from 'node:fs/promises';
 import {
   dirname,
+  extname,
   join,
   resolve,
   sep,
@@ -300,4 +302,105 @@ export async function inspectReceivedAttachment({
     state: 'verified',
     path,
   };
+}
+
+export async function inspectStoredAttachment({
+  path,
+  attachment,
+}) {
+  const clean = Store.sanitizeAttachment(attachment);
+
+  if (!clean)
+    return {state: 'invalid'};
+
+  let info;
+  try {
+    info = await stat(path);
+  } catch (error) {
+    if (error.code === 'ENOENT')
+      return {state: 'missing'};
+    throw error;
+  }
+
+  if (
+    info.size < 0 ||
+    info.size > Store.MAX_ATTACHMENT_BYTES ||
+    info.size !== clean.size
+  ) {
+    return {
+      state: 'invalid',
+      path,
+    };
+  }
+
+  const bytes = await readFile(path);
+
+  if (bytes.length !== clean.size) {
+    return {
+      state: 'invalid',
+      path,
+    };
+  }
+
+  const sha256 = createHash('sha256')
+    .update(bytes)
+    .digest('hex');
+
+  if (sha256 !== clean.sha256) {
+    return {
+      state: 'invalid',
+      path,
+    };
+  }
+
+  return {
+    state: 'verified',
+    path,
+  };
+}
+
+export async function saveAttachmentCopy({
+  sourcePath,
+  fileName,
+  destinationDir,
+}) {
+  const cleanName = Store.sanitizeFileName(fileName);
+
+  if (cleanName === '')
+    throw invalidAttachment('attachment filename is invalid');
+
+  await mkdir(destinationDir, {
+    recursive: true,
+    mode: 0o700,
+  });
+
+  const extension = extname(cleanName);
+  const stem = extension === ''
+    ? cleanName
+    : cleanName.slice(0, -extension.length);
+
+  for (let index = 1; index <= 10000; index++) {
+    const name = index === 1
+      ? cleanName
+      : `${stem}.${index}${extension}`;
+
+    const target = join(destinationDir, name);
+
+    try {
+      await copyFile(
+        sourcePath,
+        target,
+        fsConstants.COPYFILE_EXCL
+      );
+      await chmod(target, 0o600);
+      return target;
+    } catch (error) {
+      if (error.code !== 'EEXIST')
+        throw error;
+    }
+  }
+
+  const error = new Error('no free attachment save filename');
+  error.code = 'ATTACHMENT_SAVE_FAILED';
+  throw error;
 }

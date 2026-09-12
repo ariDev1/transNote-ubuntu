@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
+import {execFile} from 'node:child_process';
 import {mkdir, rm} from 'node:fs/promises';
 import {join} from 'node:path';
+import {promisify} from 'node:util';
 import {createRequire} from 'node:module';
-import {hostname} from 'node:os';
+import {homedir, hostname} from 'node:os';
 
 import {
   normalizeSyncConfig,
@@ -12,8 +14,11 @@ import {
 } from './folder-sync.mjs';
 import {
   inspectReceivedAttachment,
+  inspectStoredAttachment,
   mirrorAttachment,
   mirrorSharedAttachments,
+  resolveAttachmentPath,
+  saveAttachmentCopy,
   stageAttachment,
 } from './attachments.mjs';
 import {loadState, resolveDataDir, saveState} from './storage.mjs';
@@ -22,6 +27,7 @@ import {createExecFileRunner, createSyncthingControl} from './syncthing-control.
 
 const require = createRequire(import.meta.url);
 const Store = require('../core/Store.js');
+const execFileAsync = promisify(execFile);
 
 const OPTION_KEYS = new Map([
   ['--device-id', 'deviceId'],
@@ -195,16 +201,26 @@ async function noteCreate(dataDir, config) {
   };
 }
 
-async function attachmentAdd(dataDir, config) {
-  const input = await readStdinJson();
-  const noteId = Store.normalizeText(input.noteId);
-  const sourcePath = Store.normalizeText(input.sourcePath);
+async function addAttachmentFromSource(
+  dataDir,
+  config,
+  noteId,
+  sourcePath
+) {
+  const cleanNoteId = Store.normalizeText(noteId);
+  const cleanSourcePath = Store.normalizeText(sourcePath);
 
-  if (noteId === '' || sourcePath === '')
-    throw helperError('BAD_INPUT', 'note id and source path are required');
+  if (cleanNoteId === '' || cleanSourcePath === '') {
+    throw helperError(
+      'BAD_INPUT',
+      'note id and source path are required'
+    );
+  }
 
   const state = await loadState(dataDir);
-  const note = state.notes.find(value => value && value.id === noteId);
+  const note = state.notes.find(
+    value => value && value.id === cleanNoteId
+  );
 
   if (!note)
     throw helperError('NOTE_NOT_FOUND', 'local note was not found');
@@ -226,7 +242,7 @@ async function attachmentAdd(dataDir, config) {
     );
   }
 
-  const fileName = Store.sanitizeFileName(sourcePath);
+  const fileName = Store.sanitizeFileName(cleanSourcePath);
 
   if (fileName === '')
     throw helperError('BAD_INPUT', 'attachment filename is not usable');
@@ -235,10 +251,10 @@ async function attachmentAdd(dataDir, config) {
 
   const staged = await stageAttachment({
     attachmentRoot: join(dataDir, 'attachments'),
-    noteId,
+    noteId: cleanNoteId,
     attachmentId,
     fileName,
-    sourcePath,
+    sourcePath: cleanSourcePath,
   });
 
   const attachment = Store.createAttachment(
@@ -261,7 +277,7 @@ async function attachmentAdd(dataDir, config) {
       await mirrorAttachment({
         dataDir,
         syncDir: config.syncDir,
-        noteId,
+        noteId: cleanNoteId,
         attachment,
       });
     }
@@ -297,6 +313,242 @@ async function attachmentAdd(dataDir, config) {
     ok: true,
     note,
     attachment,
+  };
+}
+
+async function attachmentAdd(dataDir, config) {
+  const input = await readStdinJson();
+
+  return addAttachmentFromSource(
+    dataDir,
+    config,
+    input.noteId,
+    input.sourcePath
+  );
+}
+
+async function attachmentAddDialog(dataDir, config) {
+  const input = await readStdinJson();
+  const picker = process.env.TRANSNOTE_ZENITY_BIN || 'zenity';
+
+  let stdout;
+  try {
+    ({stdout} = await execFileAsync(
+      picker,
+      [
+        '--file-selection',
+        '--title=Attach file',
+      ]
+    ));
+  } catch (error) {
+    if (error.code === 1) {
+      return {
+        ok: true,
+        cancelled: true,
+      };
+    }
+
+    throw helperError(
+      'FILE_PICKER_FAILED',
+      'attachment file picker failed'
+    );
+  }
+
+  const sourcePath = Store.normalizeText(stdout);
+
+  if (sourcePath === '') {
+    return {
+      ok: true,
+      cancelled: true,
+    };
+  }
+
+  return addAttachmentFromSource(
+    dataDir,
+    config,
+    input.noteId,
+    sourcePath
+  );
+}
+
+async function resolveAttachmentActionTarget(
+  dataDir,
+  config,
+  noteId,
+  attachmentId
+) {
+  const cleanNoteId = Store.normalizeText(noteId);
+  const cleanAttachmentId = Store.normalizeText(attachmentId);
+
+  if (cleanNoteId === '' || cleanAttachmentId === '') {
+    throw helperError(
+      'BAD_INPUT',
+      'note id and attachment id are required'
+    );
+  }
+
+  const state = await loadState(dataDir);
+  const local = state.notes.find(
+    note => note && note.id === cleanNoteId
+  );
+
+  if (local) {
+    const attachment = (
+      Array.isArray(local.attachments)
+        ? local.attachments
+        : []
+    )
+      .map(value => Store.sanitizeAttachment(value))
+      .filter(Boolean)
+      .find(value => value.id === cleanAttachmentId);
+
+    if (!attachment) {
+      throw helperError(
+        'ATTACHMENT_NOT_FOUND',
+        'attachment was not found'
+      );
+    }
+
+    let path;
+    try {
+      path = resolveAttachmentPath(
+        join(dataDir, 'attachments'),
+        cleanNoteId,
+        attachment.id,
+        attachment.name
+      );
+    } catch {
+      throw helperError(
+        'ATTACHMENT_NOT_VERIFIED',
+        'attachment path is unsafe'
+      );
+    }
+
+    const inspected = await inspectStoredAttachment({
+      path,
+      attachment,
+    });
+
+    if (inspected.state !== 'verified') {
+      throw helperError(
+        'ATTACHMENT_NOT_VERIFIED',
+        'attachment bytes are not verified'
+      );
+    }
+
+    return {
+      attachment,
+      path,
+    };
+  }
+
+  if (!config.configured) {
+    throw helperError(
+      'ATTACHMENT_NOT_FOUND',
+      'attachment was not found'
+    );
+  }
+
+  const peers = await readPeerSnapshots({
+    syncDir: config.syncDir,
+    deviceId: config.deviceId,
+    allowList: config.allowList,
+  });
+
+  const peerNote = peers.notes.find(
+    note => note && note.id === cleanNoteId
+  );
+
+  if (!peerNote) {
+    throw helperError(
+      'ATTACHMENT_NOT_FOUND',
+      'attachment was not found'
+    );
+  }
+
+  const attachment = (
+    Array.isArray(peerNote.attachments)
+      ? peerNote.attachments
+      : []
+  ).find(value => value && value.id === cleanAttachmentId);
+
+  if (!attachment) {
+    throw helperError(
+      'ATTACHMENT_NOT_FOUND',
+      'attachment was not found'
+    );
+  }
+
+  const inspected = await inspectReceivedAttachment({
+    syncDir: config.syncDir,
+    noteId: cleanNoteId,
+    attachment,
+  });
+
+  if (inspected.state !== 'verified') {
+    throw helperError(
+      'ATTACHMENT_NOT_VERIFIED',
+      'attachment bytes are not verified'
+    );
+  }
+
+  return {
+    attachment,
+    path: inspected.path,
+  };
+}
+
+async function attachmentOpen(dataDir, config) {
+  const input = await readStdinJson();
+  const target = await resolveAttachmentActionTarget(
+    dataDir,
+    config,
+    input.noteId,
+    input.attachmentId
+  );
+
+  if (Store.isRiskyExecutable(target.attachment.name)) {
+    throw helperError(
+      'RISKY_ATTACHMENT',
+      'this attachment type is save-only'
+    );
+  }
+
+  const opener = process.env.TRANSNOTE_XDG_OPEN_BIN || 'xdg-open';
+
+  try {
+    await execFileAsync(opener, [target.path]);
+  } catch {
+    throw helperError(
+      'ATTACHMENT_OPEN_FAILED',
+      'could not open attachment'
+    );
+  }
+
+  return {
+    ok: true,
+  };
+}
+
+async function attachmentSave(dataDir, config) {
+  const input = await readStdinJson();
+  const target = await resolveAttachmentActionTarget(
+    dataDir,
+    config,
+    input.noteId,
+    input.attachmentId
+  );
+
+  const home = process.env.HOME || homedir();
+  const savedPath = await saveAttachmentCopy({
+    sourcePath: target.path,
+    fileName: target.attachment.name,
+    destinationDir: join(home, 'Downloads'),
+  });
+
+  return {
+    ok: true,
+    savedPath,
   };
 }
 
@@ -508,6 +760,12 @@ try {
     result = await noteShare(dataDir, config);
   else if (command === 'attachment-add')
     result = await attachmentAdd(dataDir, config);
+  else if (command === 'attachment-add-dialog')
+    result = await attachmentAddDialog(dataDir, config);
+  else if (command === 'attachment-open')
+    result = await attachmentOpen(dataDir, config);
+  else if (command === 'attachment-save')
+    result = await attachmentSave(dataDir, config);
   else if (command === 'note-delete')
     result = await noteDelete(dataDir, config);
   else if (command === 'sync-now')

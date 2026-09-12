@@ -37,10 +37,14 @@ class FooterMetadataTests(unittest.TestCase):
     def test_notes_menu_renders_version_and_repository_footer(self):
         source = (ROOT / "notesMenu.js").read_text()
 
-        self.assertIn(
-            "constructor({helper, cancellable, settings, version, repositoryUrl})",
-            source,
-        )
+        for parameter in (
+            "helper,",
+            "cancellable,",
+            "settings,",
+            "version,",
+            "repositoryUrl,",
+        ):
+            self.assertIn(parameter, source)
         self.assertIn(
             "transnote-footer",
             source,

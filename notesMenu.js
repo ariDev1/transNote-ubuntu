@@ -9,16 +9,30 @@ import {
   attachmentStateLabel,
   canUseAttachment,
 } from './attachmentUiModel.js';
+import {advancePeerNoteKnowledge} from './unreadUiModel.js';
 
 const POLL_SECONDS = 15;
 
 export class NotesMenuView {
-  constructor({helper, cancellable, settings, version, repositoryUrl}) {
+  constructor({
+    helper,
+    cancellable,
+    settings,
+    version,
+    repositoryUrl,
+    onUnreadChanged,
+  }) {
     this._helper = helper;
     this._cancellable = cancellable;
     this._settings = settings;
     this._version = String(version ?? '').trim();
     this._repositoryUrl = String(repositoryUrl ?? '').trim();
+    this._onUnreadChanged =
+      typeof onUnreadChanged === 'function'
+        ? onUnreadChanged
+        : null;
+    this._knownPeerNoteIds = new Set();
+    this._peerNotesPrimed = false;
     this._busy = false;
     this._destroyed = false;
     this._refreshBusy = false;
@@ -64,6 +78,8 @@ export class NotesMenuView {
     this.actor.add_child(this._notesView);
     this.actor.add_child(this._setupView);
     this.actor.add_child(this._footer);
+
+    this.refresh();
 
     this._pollId = GLib.timeout_add_seconds(
       GLib.PRIORITY_DEFAULT,
@@ -414,6 +430,20 @@ export class NotesMenuView {
       this._localIds = new Set(
         Array.isArray(result.localIds) ? result.localIds : []
       );
+
+      const peerKnowledge = advancePeerNoteKnowledge({
+        notes,
+        localIds: this._localIds,
+        knownIds: this._knownPeerNoteIds,
+        primed: this._peerNotesPrimed,
+      });
+
+      this._knownPeerNoteIds = peerKnowledge.knownIds;
+      this._peerNotesPrimed = peerKnowledge.primed;
+
+      if (peerKnowledge.hasNewPeerNote)
+        this._onUnreadChanged?.(true);
+
       this._diagnosticState = result.diagnostics || null;
 
       const attachmentStates =
@@ -1399,6 +1429,9 @@ export class NotesMenuView {
     this._pairedMachines = null;
     this._footer = null;
     this._clipboard = null;
+    this._knownPeerNoteIds.clear();
+    this._knownPeerNoteIds = null;
+    this._onUnreadChanged = null;
     this._repositoryUrl = '';
     this._version = '';
   }

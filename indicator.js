@@ -1,3 +1,4 @@
+import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
@@ -11,10 +12,24 @@ class TransNoteIndicator extends PanelMenu.Button {
   constructor({helper, cancellable, settings, version, repositoryUrl}) {
     super(0.0, 'TransNote', false);
 
-    this.add_child(new St.Icon({
+    const iconBox = new St.Widget({
+      layout_manager: new Clutter.BinLayout(),
+    });
+
+    iconBox.add_child(new St.Icon({
       icon_name: 'document-edit-symbolic',
       style_class: 'system-status-icon',
     }));
+
+    this._unreadDot = new St.Widget({
+      style_class: 'transnote-unread-dot',
+      x_align: Clutter.ActorAlign.END,
+      y_align: Clutter.ActorAlign.START,
+      visible: false,
+    });
+
+    iconBox.add_child(this._unreadDot);
+    this.add_child(iconBox);
 
     this._view = new NotesMenuView({
       helper,
@@ -22,6 +37,12 @@ class TransNoteIndicator extends PanelMenu.Button {
       settings,
       version,
       repositoryUrl,
+      onUnreadChanged: unread => {
+        if (unread && this.menu.isOpen)
+          return;
+
+        this._setUnread(unread);
+      },
     });
 
     this.menu.box.add_child(this._view.actor);
@@ -29,10 +50,17 @@ class TransNoteIndicator extends PanelMenu.Button {
     this._openChangedId = this.menu.connect(
       'open-state-changed',
       (_menu, open) => {
-        if (open)
+        if (open) {
+          this._setUnread(false);
           this._view?.refresh();
+        }
       }
     );
+  }
+
+  _setUnread(unread) {
+    if (this._unreadDot)
+      this._unreadDot.visible = unread === true;
   }
 
   destroy() {
@@ -43,6 +71,7 @@ class TransNoteIndicator extends PanelMenu.Button {
 
     this._view?.destroy();
     this._view = null;
+    this._unreadDot = null;
 
     super.destroy();
   }

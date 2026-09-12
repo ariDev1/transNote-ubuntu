@@ -215,3 +215,10 @@
 .transnote-repository-link {
   padding: 2px 0;
 }
+
+.transnote-unread-dot {
+  min-width: 6px;
+  min-height: 6px;
+  background-color: #e01b24;
+  border-radius: 3px;
+}

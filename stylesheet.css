@@ -1,0 +1,118 @@
+.transnote-popup {
+  min-width: 420px;
+  max-width: 520px;
+  padding: 10px;
+  spacing: 8px;
+}
+
+.transnote-tabs,
+.transnote-setup-actions,
+.transnote-note-header {
+  spacing: 6px;
+}
+
+.transnote-tab-button {
+  min-width: 84px;
+}
+
+.transnote-notes-view,
+.transnote-setup {
+  spacing: 8px;
+}
+
+.transnote-scroll {
+  max-height: 420px;
+}
+
+.transnote-section {
+  spacing: 8px;
+}
+
+.transnote-note {
+  spacing: 4px;
+  padding: 8px 10px;
+}
+
+.transnote-note-title,
+.transnote-setup-title {
+  font-weight: bold;
+}
+
+.transnote-note-meta,
+.transnote-hint,
+.transnote-field-label,
+.transnote-status,
+.transnote-empty,
+.transnote-diagnostics {
+  font-size: 0.9em;
+}
+
+.transnote-note-meta,
+.transnote-hint,
+.transnote-diagnostics {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.transnote-entry {
+  margin-top: 4px;
+}
+
+.transnote-body-entry {
+  min-height: 72px;
+}
+
+.transnote-add-button {
+  margin-top: 4px;
+}
+
+.transnote-share-button {
+  min-width: 72px;
+}
+
+.transnote-diagnostics {
+  margin-top: 4px;
+}
+
+.transnote-note-actions {
+  spacing: 6px;
+  margin-top: 4px;
+}
+
+.transnote-note-action {
+  padding: 3px 8px;
+}
+
+.transnote-lan-section {
+  spacing: 6px;
+  margin-top: 8px;
+  padding-top: 6px;
+}
+
+.transnote-pair-row {
+  spacing: 6px;
+}
+
+.transnote-pair-code {
+  min-width: 280px;
+}
+
+.transnote-lan-button {
+  min-width: 96px;
+}
+
+.transnote-paired-list {
+  font-size: 0.9em;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.transnote-pending-list {
+  spacing: 4px;
+}
+
+.transnote-pending-row {
+  spacing: 6px;
+}
+
+.transnote-pending-label {
+  font-size: 0.9em;
+}

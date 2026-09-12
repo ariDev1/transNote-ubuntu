@@ -1,0 +1,385 @@
+#!/usr/bin/env node
+
+import {mkdir} from 'node:fs/promises';
+import {createRequire} from 'node:module';
+import {hostname} from 'node:os';
+
+import {
+  normalizeSyncConfig,
+  readPeerSnapshots,
+  writeSnapshot,
+} from './folder-sync.mjs';
+import {loadState, resolveDataDir, saveState} from './storage.mjs';
+import {decodePairingCode, loadLanPeers, saveLanPeer} from './lan-pairing.mjs';
+import {createExecFileRunner, createSyncthingControl} from './syncthing-control.mjs';
+
+const require = createRequire(import.meta.url);
+const Store = require('../core/Store.js');
+
+const OPTION_KEYS = new Map([
+  ['--device-id', 'deviceId'],
+  ['--sync-dir', 'syncDir'],
+  ['--allow-list', 'allowList'],
+]);
+
+function helperError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function writeJson(stream, value) {
+  stream.write(`${JSON.stringify(value)}\n`);
+}
+
+async function readStdinJson() {
+  let raw = '';
+  process.stdin.setEncoding('utf8');
+
+  for await (const chunk of process.stdin)
+    raw += chunk;
+
+  if (Store.normalizeText(raw) === '')
+    return {};
+
+  try {
+    return JSON.parse(raw);
+  } catch (cause) {
+    const error = new Error('stdin is not valid JSON', {cause});
+    error.code = 'BAD_INPUT';
+    throw error;
+  }
+}
+
+function parseOptions(argv) {
+  const options = {};
+
+  for (let i = 0; i < argv.length; i++) {
+    const key = OPTION_KEYS.get(argv[i]);
+    if (!key)
+      throw helperError('BAD_OPTION', `unsupported option: ${argv[i]}`);
+
+    if (i + 1 >= argv.length || OPTION_KEYS.has(argv[i + 1]))
+      throw helperError('BAD_OPTION', `missing value for ${argv[i]}`);
+
+    options[key] = argv[++i];
+  }
+
+  return options;
+}
+
+function resolveDeviceId(options) {
+  return Store.normalizeText(options.deviceId) ||
+    Store.normalizeText(process.env.TRANSNOTE_DEVICE_ID) ||
+    Store.normalizeText(hostname()) ||
+    'local';
+}
+
+function resolveSyncConfig(options) {
+  return normalizeSyncConfig({
+    deviceId: resolveDeviceId(options),
+    syncDir: options.syncDir ?? process.env.TRANSNOTE_SYNC_DIR ?? '',
+    allowList: options.allowList ?? process.env.TRANSNOTE_ALLOW_LIST ?? '',
+  });
+}
+
+function emptyDiagnostics(configured = false) {
+  return {
+    configured,
+    files: 0,
+    fetched: 0,
+    snapNotes: 0,
+    peerNotes: 0,
+    shown: 0,
+    errors: 0,
+  };
+}
+
+async function status(dataDir) {
+  const state = await loadState(dataDir);
+  return {
+    ok: true,
+    deviceId: state.deviceId,
+    noteCount: state.notes.length,
+  };
+}
+
+async function notesList(dataDir, config) {
+  const state = await loadState(dataDir);
+  const localIds = state.notes.map(note => note.id);
+  const mine = new Set(localIds);
+
+  let peers = {
+    notes: [],
+    pairs: [],
+    diagnostics: emptyDiagnostics(config.configured),
+  };
+
+  if (config.configured) {
+    peers = await readPeerSnapshots({
+      syncDir: config.syncDir,
+      deviceId: config.deviceId,
+      allowList: config.allowList,
+    });
+  }
+
+  const peerNotes = peers.notes.filter(note => !mine.has(note.id));
+  const notes = Store.sortNotes(state.notes.concat(peerNotes));
+
+  return {
+    ok: true,
+    notes,
+    localIds,
+    diagnostics: {
+      configured: config.configured,
+      files: peers.diagnostics.files,
+      fetched: peers.diagnostics.fetched,
+      snapNotes: peers.diagnostics.snapNotes,
+      peerNotes: peerNotes.length,
+      shown: notes.length,
+      errors: peers.diagnostics.errors,
+    },
+  };
+}
+
+async function noteCreate(dataDir, config) {
+  const input = await readStdinJson();
+  const state = await loadState(dataDir);
+  const note = Store.createNote(input.title, input.body, config.deviceId);
+
+  state.version = 1;
+  state.deviceId = config.deviceId;
+  state.notes.push(note);
+  state.notes = Store.sortNotes(state.notes);
+
+  await saveState(dataDir, state);
+
+  return {
+    ok: true,
+    note,
+  };
+}
+
+async function noteShare(dataDir, config) {
+  const input = await readStdinJson();
+  const id = Store.normalizeText(input.id);
+
+  if (id === '')
+    throw helperError('BAD_INPUT', 'note id is required');
+
+  const state = await loadState(dataDir);
+  const note = state.notes.find(value => value && value.id === id);
+
+  if (!note)
+    throw helperError('NOTE_NOT_FOUND', 'local note was not found');
+
+  if (!Store.setShared(note, input.shared === true, config.deviceId))
+    throw helperError('NOT_OWNER', 'only the note author can change sharing');
+
+  state.version = 1;
+  state.deviceId = config.deviceId;
+  state.notes = Store.sortNotes(state.notes);
+  await saveState(dataDir, state);
+
+  if (config.configured) {
+    await writeSnapshot({
+      syncDir: config.syncDir,
+      deviceId: config.deviceId,
+      notes: state.notes,
+      outbox: state.outbox,
+    });
+  }
+
+  return {
+    ok: true,
+    note,
+  };
+}
+
+async function noteDelete(dataDir, config) {
+  const input = await readStdinJson();
+  const id = Store.normalizeText(input.id);
+
+  if (id === '')
+    throw helperError('BAD_INPUT', 'note id is required');
+
+  const state = await loadState(dataDir);
+  const index = state.notes.findIndex(value => value && value.id === id);
+
+  if (index < 0)
+    throw helperError('NOTE_NOT_FOUND', 'local note was not found');
+
+  state.notes.splice(index, 1);
+  state.version = 1;
+  state.deviceId = config.deviceId;
+  state.notes = Store.sortNotes(state.notes);
+  await saveState(dataDir, state);
+
+  if (config.configured) {
+    await writeSnapshot({
+      syncDir: config.syncDir,
+      deviceId: config.deviceId,
+      notes: state.notes,
+      outbox: state.outbox,
+    });
+  }
+
+  return {
+    ok: true,
+    deletedId: id,
+  };
+}
+
+async function syncNow(dataDir, config) {
+  if (!config.configured)
+    throw helperError('SYNC_NOT_CONFIGURED', 'device id and sync folder are required');
+
+  const state = await loadState(dataDir);
+
+  await writeSnapshot({
+    syncDir: config.syncDir,
+    deviceId: config.deviceId,
+    notes: state.notes,
+    outbox: state.outbox,
+  });
+
+  return notesList(dataDir, config);
+}
+
+
+function requireLanConfig(config) {
+  if (!config.configured)
+    throw helperError('SYNC_NOT_CONFIGURED', 'device id and sync folder are required');
+}
+
+function makeSyncthingControl() {
+  return createSyncthingControl({
+    run: createExecFileRunner({
+      binary: process.env.TRANSNOTE_SYNCTHING_BIN || 'syncthing',
+    }),
+  });
+}
+
+async function lanPrepare(config) {
+  requireLanConfig(config);
+  await mkdir(config.syncDir, {recursive: true, mode: 0o700});
+
+  const result = await makeSyncthingControl().prepare({
+    transnoteDeviceId: config.deviceId,
+    syncDir: config.syncDir,
+  });
+
+  return {
+    ok: true,
+    pairingCode: result.pairingCode,
+    syncthingDeviceId: result.localDeviceId,
+    folderId: result.folderId,
+    folderPath: result.folderPath,
+  };
+}
+
+async function lanPair(dataDir, config) {
+  requireLanConfig(config);
+  await mkdir(config.syncDir, {recursive: true, mode: 0o700});
+  const input = await readStdinJson();
+  const remote = decodePairingCode(input.pairingCode);
+
+  const result = await makeSyncthingControl().pair({
+    localTransnoteDeviceId: config.deviceId,
+    syncDir: config.syncDir,
+    remote,
+  });
+
+  await saveLanPeer(dataDir, result.peer);
+
+  return {
+    ok: true,
+    peer: result.peer,
+  };
+}
+
+async function lanAcceptPending(config) {
+  requireLanConfig(config);
+  await mkdir(config.syncDir, {recursive: true, mode: 0o700});
+  const input = await readStdinJson();
+
+  const result = await makeSyncthingControl().acceptPending({
+    syncDir: config.syncDir,
+    folderId: input.folderId,
+    syncthingDeviceId: input.syncthingDeviceId,
+  });
+
+  return {
+    ok: true,
+    ...result,
+  };
+}
+
+async function lanStatus(dataDir, config) {
+  const store = await loadLanPeers(dataDir);
+  const result = await makeSyncthingControl().status({
+    syncDir: config.syncDir,
+    peers: store.peers,
+  });
+
+  return {
+    ok: true,
+    ...result,
+  };
+}
+async function folderCreate(config) {
+  if (config.syncDir === '')
+    throw helperError('SYNC_DIR_REQUIRED', 'sync folder is required');
+
+  await mkdir(config.syncDir, {recursive: true, mode: 0o700});
+
+  return {
+    ok: true,
+    path: config.syncDir,
+  };
+}
+
+const command = process.argv[2] || '';
+const dataDir = resolveDataDir();
+
+try {
+  const options = parseOptions(process.argv.slice(3));
+  const config = resolveSyncConfig(options);
+  let result;
+
+  if (command === 'status')
+    result = await status(dataDir);
+  else if (command === 'notes-list')
+    result = await notesList(dataDir, config);
+  else if (command === 'note-create')
+    result = await noteCreate(dataDir, config);
+  else if (command === 'note-share')
+    result = await noteShare(dataDir, config);
+  else if (command === 'note-delete')
+    result = await noteDelete(dataDir, config);
+  else if (command === 'sync-now')
+    result = await syncNow(dataDir, config);
+  else if (command === 'folder-create')
+    result = await folderCreate(config);
+  else if (command === 'lan-prepare')
+    result = await lanPrepare(config);
+  else if (command === 'lan-pair')
+    result = await lanPair(dataDir, config);
+  else if (command === 'lan-accept-pending')
+    result = await lanAcceptPending(config);
+  else if (command === 'lan-status')
+    result = await lanStatus(dataDir, config);
+  else
+    throw helperError('BAD_COMMAND', `unsupported command: ${command}`);
+
+  writeJson(process.stdout, result);
+} catch (error) {
+  writeJson(process.stderr, {
+    ok: false,
+    error: {
+      code: error.code || 'HELPER_FAILED',
+      message: String(error.message || 'helper failed'),
+    },
+  });
+  process.exitCode = 1;
+}

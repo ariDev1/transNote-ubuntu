@@ -1,0 +1,11 @@
+{
+  "uuid": "transnote@aridev1",
+  "name": "TransNote",
+  "description": "Shared text notes for GNOME Shell",
+  "version": 4,
+  "shell-version": [
+    "46"
+  ],
+  "url": "https://github.com/ariDev1/transNote-ubuntu",
+  "settings-schema": "org.gnome.shell.extensions.transnote"
+}

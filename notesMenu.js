@@ -1,0 +1,946 @@
+import GLib from 'gi://GLib';
+import Pango from 'gi://Pango';
+import St from 'gi://St';
+
+import {addQualifiedPeer, operatorLanErrorMessage} from './lanUiModel.js';
+
+const POLL_SECONDS = 15;
+
+export class NotesMenuView {
+  constructor({helper, cancellable, settings}) {
+    this._helper = helper;
+    this._cancellable = cancellable;
+    this._settings = settings;
+    this._busy = false;
+    this._destroyed = false;
+    this._refreshBusy = false;
+    this._refreshPending = false;
+    this._localIds = new Set();
+    this._diagnosticState = null;
+    this._lanStatusBusy = false;
+    this._clipboard = St.Clipboard.get_default();
+
+    this.actor = new St.BoxLayout({
+      vertical: true,
+      style_class: 'transnote-popup',
+    });
+
+    this._tabs = new St.BoxLayout({
+      style_class: 'transnote-tabs',
+    });
+
+    this._notesTab = new St.Button({
+      label: 'Notes',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-tab-button',
+    });
+    this._setupTab = new St.Button({
+      label: 'Setup',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-tab-button',
+    });
+
+    this._notesTab.connect('clicked', () => this._showView('notes'));
+    this._setupTab.connect('clicked', () => this._showView('setup'));
+    this._tabs.add_child(this._notesTab);
+    this._tabs.add_child(this._setupTab);
+
+    this._notesView = this._buildNotesView();
+    this._setupView = this._buildSetupView();
+    this._setupView.visible = false;
+
+    this.actor.add_child(this._tabs);
+    this.actor.add_child(this._notesView);
+    this.actor.add_child(this._setupView);
+
+    this._pollId = GLib.timeout_add_seconds(
+      GLib.PRIORITY_DEFAULT,
+      POLL_SECONDS,
+      () => {
+        if (this._destroyed)
+          return GLib.SOURCE_REMOVE;
+
+        this.refresh();
+        return GLib.SOURCE_CONTINUE;
+      }
+    );
+  }
+
+  _buildNotesView() {
+    const view = new St.BoxLayout({
+      vertical: true,
+      style_class: 'transnote-notes-view',
+    });
+
+    this._status = new St.Label({
+      text: 'Ready',
+      style_class: 'transnote-status',
+    });
+
+    this._notesBox = new St.BoxLayout({
+      vertical: true,
+      style_class: 'transnote-section',
+    });
+
+    this._scrollView = new St.ScrollView({
+      style_class: 'transnote-scroll',
+      overlay_scrollbars: true,
+    });
+    this._scrollView.set_policy(
+      St.PolicyType.NEVER,
+      St.PolicyType.AUTOMATIC
+    );
+    this._scrollView.set_child(this._notesBox);
+
+    this._titleEntry = new St.Entry({
+      hint_text: 'Title',
+      can_focus: true,
+      style_class: 'transnote-entry',
+    });
+
+    this._bodyEntry = new St.Entry({
+      hint_text: 'Note',
+      can_focus: true,
+      style_class: 'transnote-entry transnote-body-entry',
+    });
+    this._bodyEntry.clutter_text.single_line_mode = false;
+    this._bodyEntry.clutter_text.line_wrap = true;
+    this._bodyEntry.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+
+    this._addButton = new St.Button({
+      label: 'Add note',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-add-button',
+    });
+    this._addButton.connect('clicked', () => this._createNote());
+
+    view.add_child(this._status);
+    view.add_child(this._scrollView);
+    view.add_child(this._titleEntry);
+    view.add_child(this._bodyEntry);
+    view.add_child(this._addButton);
+    return view;
+  }
+
+  _buildSetupView() {
+    const view = new St.BoxLayout({
+      vertical: true,
+      style_class: 'transnote-setup',
+    });
+
+    view.add_child(new St.Label({
+      text: 'LAN folder sync',
+      style_class: 'transnote-setup-title',
+    }));
+    view.add_child(new St.Label({
+      text: 'Keep the machine name stable after sharing notes.',
+      style_class: 'transnote-hint',
+    }));
+
+    view.add_child(new St.Label({
+      text: 'Machine name',
+      style_class: 'transnote-field-label',
+    }));
+    this._deviceEntry = new St.Entry({
+      hint_text: 'desktop',
+      can_focus: true,
+      style_class: 'transnote-entry',
+      text: this._settings.get_string('device-id'),
+    });
+    view.add_child(this._deviceEntry);
+
+    view.add_child(new St.Label({
+      text: 'Shared folder',
+      style_class: 'transnote-field-label',
+    }));
+    this._syncDirEntry = new St.Entry({
+      hint_text: '~/transnote-lan',
+      can_focus: true,
+      style_class: 'transnote-entry',
+      text: this._settings.get_string('sync-dir'),
+    });
+    view.add_child(this._syncDirEntry);
+
+    view.add_child(new St.Label({
+      text: 'Qualified peers',
+      style_class: 'transnote-field-label',
+    }));
+    this._allowListEntry = new St.Entry({
+      hint_text: 'laptop,desktop',
+      can_focus: true,
+      style_class: 'transnote-entry',
+      text: this._settings.get_string('allow-list'),
+    });
+    view.add_child(this._allowListEntry);
+
+    const actions = new St.BoxLayout({
+      style_class: 'transnote-setup-actions',
+    });
+
+    this._createFolderButton = new St.Button({
+      label: 'Create folder',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button',
+    });
+    this._saveSetupButton = new St.Button({
+      label: 'Save',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button',
+    });
+    this._checkNowButton = new St.Button({
+      label: 'Check now',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button',
+    });
+
+    this._createFolderButton.connect('clicked', () => this._createFolder());
+    this._saveSetupButton.connect('clicked', () => this._saveSetup());
+    this._checkNowButton.connect('clicked', () => this._checkNow());
+
+    actions.add_child(this._createFolderButton);
+    actions.add_child(this._saveSetupButton);
+    actions.add_child(this._checkNowButton);
+    view.add_child(actions);
+
+    this._setupStatus = new St.Label({
+      text: 'Setup values are stored for this GNOME user.',
+      style_class: 'transnote-status',
+    });
+    this._diagnostics = new St.Label({
+      text: 'LAN: not configured',
+      style_class: 'transnote-diagnostics',
+    });
+
+    view.add_child(this._setupStatus);
+    view.add_child(this._diagnostics);
+
+    const lanSection = new St.BoxLayout({
+      vertical: true,
+      style_class: 'transnote-lan-section',
+    });
+    lanSection.add_child(new St.Label({
+      text: 'LAN sharing',
+      style_class: 'transnote-setup-title',
+    }));
+
+    this._lanRuntimeStatus = new St.Label({
+      text: 'Syncthing: not checked',
+      style_class: 'transnote-diagnostics',
+    });
+    lanSection.add_child(this._lanRuntimeStatus);
+
+    lanSection.add_child(new St.Label({
+      text: 'Pending TransNote folders',
+      style_class: 'transnote-field-label',
+    }));
+    this._pendingOffersBox = new St.BoxLayout({
+      vertical: true,
+      style_class: 'transnote-pending-list',
+    });
+    lanSection.add_child(this._pendingOffersBox);
+    this._renderPendingOffers([]);
+
+    this._prepareLanButton = new St.Button({
+      label: 'Prepare LAN',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-lan-button',
+    });
+    this._prepareLanButton.connect('clicked', () => this._prepareLan());
+    lanSection.add_child(this._prepareLanButton);
+
+    lanSection.add_child(new St.Label({
+      text: 'Your pairing code',
+      style_class: 'transnote-field-label',
+    }));
+
+    const codeRow = new St.BoxLayout({
+      style_class: 'transnote-pair-row',
+    });
+    this._pairingCodeEntry = new St.Entry({
+      hint_text: 'Press Prepare LAN first',
+      can_focus: true,
+      x_expand: true,
+      style_class: 'transnote-entry transnote-pair-code',
+    });
+    this._pairingCodeEntry.clutter_text.editable = false;
+    this._copyPairingButton = new St.Button({
+      label: 'Copy code',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button',
+    });
+    this._copyPairingButton.connect('clicked', () => this._copyPairingCode());
+    codeRow.add_child(this._pairingCodeEntry);
+    codeRow.add_child(this._copyPairingButton);
+    lanSection.add_child(codeRow);
+
+    lanSection.add_child(new St.Label({
+      text: 'Add another machine',
+      style_class: 'transnote-field-label',
+    }));
+    this._incomingPairingEntry = new St.Entry({
+      hint_text: 'Paste TN1 pairing code',
+      can_focus: true,
+      style_class: 'transnote-entry',
+    });
+    lanSection.add_child(this._incomingPairingEntry);
+
+    this._pairLanButton = new St.Button({
+      label: 'Pair',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-lan-button',
+    });
+    this._pairLanButton.connect('clicked', () => this._pairLan());
+    lanSection.add_child(this._pairLanButton);
+
+    lanSection.add_child(new St.Label({
+      text: 'Paired machines',
+      style_class: 'transnote-field-label',
+    }));
+    this._pairedMachines = new St.Label({
+      text: 'No paired machines yet.',
+      style_class: 'transnote-paired-list',
+    });
+    this._pairedMachines.clutter_text.line_wrap = true;
+    lanSection.add_child(this._pairedMachines);
+
+    view.add_child(lanSection);
+    return view;
+  }
+
+  _showView(name) {
+    if (this._destroyed)
+      return;
+
+    const setup = name === 'setup';
+    this._notesView.visible = !setup;
+    this._setupView.visible = setup;
+
+    if (setup) {
+      this._deviceEntry.set_text(this._settings.get_string('device-id'));
+      this._syncDirEntry.set_text(this._settings.get_string('sync-dir'));
+      this._allowListEntry.set_text(this._settings.get_string('allow-list'));
+      this._updateDiagnostics(this._diagnosticState);
+      this._refreshLanStatus();
+    } else {
+      this.refresh();
+    }
+  }
+
+  async refresh() {
+    if (this._destroyed)
+      return;
+
+    if (this._refreshBusy) {
+      this._refreshPending = true;
+      return;
+    }
+
+    this._refreshBusy = true;
+    this._status.text = 'Loading…';
+
+    try {
+      const result = await this._helper.loadNotes(this._cancellable);
+
+      if (this._destroyed)
+        return;
+
+      const notes = Array.isArray(result.notes) ? result.notes : [];
+      this._localIds = new Set(
+        Array.isArray(result.localIds) ? result.localIds : []
+      );
+      this._diagnosticState = result.diagnostics || null;
+      this._renderNotes(notes);
+      this._updateDiagnostics(this._diagnosticState);
+      this._status.text = `${notes.length} note${notes.length === 1 ? '' : 's'}`;
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
+    } finally {
+      this._refreshBusy = false;
+
+      if (this._refreshPending && !this._destroyed) {
+        this._refreshPending = false;
+        this.refresh();
+      }
+    }
+  }
+
+  _renderNotes(notes) {
+    for (const child of this._notesBox.get_children())
+      child.destroy();
+
+    if (notes.length === 0) {
+      this._notesBox.add_child(new St.Label({
+        text: 'No notes yet.',
+        style_class: 'transnote-empty',
+      }));
+      return;
+    }
+
+    const deviceId = this._settings.get_string('device-id').trim();
+
+    for (const note of notes) {
+      const box = new St.BoxLayout({
+        vertical: true,
+        style_class: 'transnote-note',
+      });
+      const header = new St.BoxLayout({
+        style_class: 'transnote-note-header',
+      });
+
+      const title = new St.Label({
+        text: String(note.title || 'Untitled'),
+        style_class: 'transnote-note-title',
+        x_expand: true,
+      });
+      title.clutter_text.line_wrap = true;
+      title.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+      header.add_child(title);
+
+      const isLocal = this._localIds.has(note.id);
+      const canShare = isLocal && deviceId !== '' && note.author === deviceId;
+
+      if (canShare) {
+        const shareButton = new St.Button({
+          label: note.shared === true ? 'Unshare' : 'Share',
+          can_focus: true,
+          reactive: true,
+          style_class: 'button transnote-share-button',
+        });
+        shareButton.connect(
+          'clicked',
+          () => this._setShared(note.id, note.shared !== true)
+        );
+        header.add_child(shareButton);
+      }
+
+      box.add_child(header);
+
+      if (!isLocal) {
+        box.add_child(new St.Label({
+          text: `from ${String(note.author || 'unknown')}`,
+          style_class: 'transnote-note-meta',
+        }));
+      } else if (!canShare && deviceId !== '') {
+        box.add_child(new St.Label({
+          text: `local note by ${String(note.author || 'unknown')}`,
+          style_class: 'transnote-note-meta',
+        }));
+      }
+
+      const body = new St.Label({
+        text: String(note.body || ''),
+        style_class: 'transnote-note-body',
+        x_expand: true,
+      });
+      body.clutter_text.line_wrap = true;
+      body.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+      body.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+
+      box.add_child(body);
+
+      const actions = new St.BoxLayout({
+        style_class: 'transnote-note-actions',
+      });
+
+      const copyButton = new St.Button({
+        label: 'Copy',
+        can_focus: true,
+        reactive: true,
+        style_class: 'button transnote-note-action',
+      });
+      copyButton.connect('clicked', () => this._copyNote(note));
+      actions.add_child(copyButton);
+
+      if (isLocal) {
+        const deleteButton = new St.Button({
+          label: 'Delete',
+          can_focus: true,
+          reactive: true,
+          style_class: 'button transnote-note-action',
+        });
+        deleteButton.connect('clicked', () => this._deleteNote(note.id));
+        actions.add_child(deleteButton);
+      }
+
+      box.add_child(actions);
+      this._notesBox.add_child(box);
+    }
+  }
+
+  _copyNote(note) {
+    if (this._destroyed || !note)
+      return;
+
+    const text = String(note.body ?? '').replace(/\r\n/g, '\n');
+    this._clipboard.set_text(St.ClipboardType.CLIPBOARD, text);
+    this._status.text = 'Copied.';
+  }
+
+  async _deleteNote(noteId) {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    this._status.text = 'Deleting…';
+
+    try {
+      await this._helper.deleteNote(noteId, this._cancellable);
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _prepareLan() {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    try {
+      const config = this._saveDraftSettings();
+      if (config.syncDir === '')
+        throw new Error('Enter a shared folder first.');
+
+      this._setupStatus.text = 'Preparing LAN…';
+      const result = await this._helper.prepareLan(this._cancellable);
+      if (this._destroyed)
+        return;
+
+      this._pairingCodeEntry.set_text(String(result.pairingCode || ''));
+      this._setupStatus.text = 'LAN is prepared. Share the pairing code with the other machine.';
+      await this._refreshLanStatus();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._setupStatus.text = operatorLanErrorMessage(error);
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  _copyPairingCode() {
+    if (this._destroyed)
+      return;
+
+    const code = this._pairingCodeEntry.get_text().trim();
+    if (code === '') {
+      this._setupStatus.text = 'Press Prepare LAN first.';
+      return;
+    }
+
+    this._clipboard.set_text(St.ClipboardType.CLIPBOARD, code);
+    this._setupStatus.text = 'Pairing code copied.';
+  }
+
+  async _pairLan() {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    try {
+      const config = this._saveDraftSettings();
+      if (config.syncDir === '')
+        throw new Error('Enter a shared folder first.');
+
+      const pairingCode = this._incomingPairingEntry.get_text().trim();
+      if (pairingCode === '')
+        throw new Error('Paste a TransNote pairing code first.');
+
+      this._setupStatus.text = 'Pairing…';
+      const result = await this._helper.pairLan(
+        pairingCode,
+        this._cancellable
+      );
+      if (this._destroyed)
+        return;
+
+      const peerName = String(result.peer?.transnoteDeviceId || '').trim();
+      if (peerName === '')
+        throw new Error('Pairing returned no TransNote machine name.');
+
+      const current = this._settings.get_string('allow-list');
+      const updated = addQualifiedPeer(current, peerName);
+      if (updated !== current)
+        this._settings.set_string('allow-list', updated);
+      this._allowListEntry.set_text(updated);
+
+      const prepared = await this._helper.prepareLan(this._cancellable);
+      if (this._destroyed)
+        return;
+      this._pairingCodeEntry.set_text(String(prepared.pairingCode || ''));
+      this._incomingPairingEntry.set_text('');
+      this._setupStatus.text = `Paired with ${peerName}.`;
+      await this._refreshLanStatus();
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._setupStatus.text = operatorLanErrorMessage(error);
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  _renderPendingOffers(offers) {
+    if (this._destroyed || !this._pendingOffersBox)
+      return;
+
+    for (const child of this._pendingOffersBox.get_children())
+      child.destroy();
+
+    const pending = Array.isArray(offers) ? offers : [];
+    if (pending.length === 0) {
+      this._pendingOffersBox.add_child(new St.Label({
+        text: 'No pending TransNote folders.',
+        style_class: 'transnote-hint',
+      }));
+      return;
+    }
+
+    for (const offer of pending) {
+      const folderId = String(offer?.folderId || '').trim();
+      const syncthingDeviceId = String(offer?.syncthingDeviceId || '').trim();
+      if (folderId === '' || syncthingDeviceId === '')
+        continue;
+
+      const row = new St.BoxLayout({
+        style_class: 'transnote-pending-row',
+      });
+      const remoteName = String(offer?.deviceName || '').trim();
+      const remoteLabel = remoteName !== ''
+        ? remoteName
+        : `${syncthingDeviceId.slice(0, 7)}…`;
+      const label = new St.Label({
+        text: `${remoteLabel} · ${folderId}`,
+        x_expand: true,
+        style_class: 'transnote-pending-label',
+      });
+      const acceptButton = new St.Button({
+        label: 'Accept',
+        can_focus: true,
+        reactive: true,
+        style_class: 'button',
+      });
+      acceptButton.connect(
+        'clicked',
+        () => this._acceptPendingOffer({folderId, syncthingDeviceId})
+      );
+      row.add_child(label);
+      row.add_child(acceptButton);
+      this._pendingOffersBox.add_child(row);
+    }
+  }
+
+  async _acceptPendingOffer(offer) {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    try {
+      const config = this._saveDraftSettings();
+      if (config.syncDir === '')
+        throw new Error('Enter a shared folder first.');
+
+      this._setupStatus.text = 'Accepting TransNote folder…';
+      const result = await this._helper.acceptPendingLan(
+        offer.folderId,
+        offer.syncthingDeviceId,
+        this._cancellable
+      );
+      if (this._destroyed)
+        return;
+
+      this._setupStatus.text = `Folder accepted: ${String(result.folderId || '')}`;
+      await this._helper.syncNow(this._cancellable);
+      await this._refreshLanStatus();
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._setupStatus.text = operatorLanErrorMessage(error);
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _refreshLanStatus() {
+    if (this._destroyed || this._lanStatusBusy)
+      return;
+
+    this._lanStatusBusy = true;
+    try {
+      const result = await this._helper.lanStatus(this._cancellable);
+      if (this._destroyed)
+        return;
+
+      let syncthingText;
+      if (result.installed !== true)
+        syncthingText = 'Syncthing: not installed';
+      else if (result.running !== true)
+        syncthingText = 'Syncthing: not running';
+      else if (Array.isArray(result.peers) && result.peers.some(peer => peer.connected === true))
+        syncthingText = 'Syncthing: connected';
+      else
+        syncthingText = 'Syncthing: running';
+
+      const pendingOffers = Array.isArray(result.pendingOffers)
+        ? result.pendingOffers
+        : [];
+      this._renderPendingOffers(pendingOffers);
+
+      let folderText = pendingOffers.length > 0
+        ? 'Folder: offer waiting'
+        : 'Folder: not prepared';
+      if (result.folder?.configured === true) {
+        if (result.folder.paused === true)
+          folderText = 'Folder: paused';
+        else if (result.folder.type === 'sendreceive')
+          folderText = 'Folder: ready';
+        else
+          folderText = 'Folder: check required';
+      }
+      this._lanRuntimeStatus.text = `${syncthingText}\n${folderText}`;
+
+      const peers = Array.isArray(result.peers) ? result.peers : [];
+      if (peers.length === 0) {
+        this._pairedMachines.text = 'No paired machines yet.';
+      } else {
+        this._pairedMachines.text = peers.map(peer => {
+          const state = peer.connected === true
+            ? 'connected'
+            : peer.configured === true
+              ? 'configured'
+              : 'not configured';
+          return `${peer.connected === true ? '●' : '○'} ${peer.transnoteDeviceId} — ${state}`;
+        }).join('\n');
+      }
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled()) {
+        this._renderPendingOffers([]);
+        this._lanRuntimeStatus.text = operatorLanErrorMessage(error);
+      }
+    } finally {
+      this._lanStatusBusy = false;
+    }
+  }
+
+  _saveDraftSettings() {
+    const deviceId = this._deviceEntry.get_text().trim();
+    const syncDir = this._syncDirEntry.get_text().trim();
+    const allowList = this._allowListEntry.get_text().trim();
+
+    if (syncDir !== '' && deviceId === '')
+      throw new Error('Give this machine a name before enabling LAN sync.');
+
+    this._settings.set_string('device-id', deviceId);
+    this._settings.set_string('sync-dir', syncDir);
+    this._settings.set_string('allow-list', allowList);
+
+    return {deviceId, syncDir, allowList};
+  }
+
+  async _saveSetup() {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    try {
+      const config = this._saveDraftSettings();
+      if (config.syncDir === '') {
+        this._setupStatus.text = 'Saved. LAN sync is off.';
+        await this.refresh();
+        return;
+      }
+
+      this._setupStatus.text = 'Saving and checking…';
+      const result = await this._helper.syncNow(this._cancellable);
+      if (this._destroyed)
+        return;
+
+      this._diagnosticState = result.diagnostics || null;
+      this._updateDiagnostics(this._diagnosticState);
+      this._setupStatus.text = 'Saved. LAN sync is on.';
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._setupStatus.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _createFolder() {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    try {
+      const config = this._saveDraftSettings();
+      if (config.syncDir === '')
+        throw new Error('Enter a shared folder first.');
+
+      this._setupStatus.text = 'Creating folder…';
+      const result = await this._helper.createFolder(this._cancellable);
+      if (!this._destroyed)
+        this._setupStatus.text = `Folder ready: ${result.path}`;
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._setupStatus.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _checkNow() {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    try {
+      this._setupStatus.text = 'Checking peers…';
+      const result = await this._helper.syncNow(this._cancellable);
+      if (this._destroyed)
+        return;
+
+      this._diagnosticState = result.diagnostics || null;
+      this._updateDiagnostics(this._diagnosticState);
+      this._setupStatus.text = 'Check complete.';
+      await this._refreshLanStatus();
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._setupStatus.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _setShared(noteId, shared) {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    this._status.text = shared ? 'Sharing…' : 'Unsharing…';
+
+    try {
+      await this._helper.setShared(
+        noteId,
+        shared,
+        this._cancellable
+      );
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  _updateDiagnostics(diagnostics) {
+    if (!this._diagnostics)
+      return;
+
+    if (!diagnostics || diagnostics.configured !== true) {
+      this._diagnostics.text = 'LAN: not configured';
+      return;
+    }
+
+    const errors = Number(diagnostics.errors || 0);
+    this._diagnostics.text =
+      `files=${Number(diagnostics.files || 0)} ` +
+      `fetched=${Number(diagnostics.fetched || 0)} ` +
+      `snapNotes=${Number(diagnostics.snapNotes || 0)} ` +
+      `peerNotes=${Number(diagnostics.peerNotes || 0)} ` +
+      `shown=${Number(diagnostics.shown || 0)}` +
+      (errors > 0 ? ` errors=${errors}` : '');
+  }
+
+  async _createNote() {
+    if (this._destroyed || this._busy)
+      return;
+
+    const title = this._titleEntry.get_text();
+    const body = this._bodyEntry.get_text();
+
+    if (title.trim() === '' && body.trim() === '') {
+      this._status.text = 'Enter a title or note.';
+      return;
+    }
+
+    this._busy = true;
+    this._addButton.reactive = false;
+    this._status.text = 'Saving…';
+
+    try {
+      await this._helper.createNote(
+        title,
+        body,
+        this._cancellable
+      );
+
+      if (this._destroyed)
+        return;
+
+      this._titleEntry.set_text('');
+      this._bodyEntry.set_text('');
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+      if (!this._destroyed)
+        this._addButton.reactive = true;
+    }
+  }
+
+  destroy() {
+    if (this._destroyed)
+      return;
+
+    this._destroyed = true;
+    this._refreshPending = false;
+
+    if (this._pollId) {
+      GLib.Source.remove(this._pollId);
+      this._pollId = 0;
+    }
+
+    this.actor?.destroy();
+    this.actor = null;
+    this._settings = null;
+    this._status = null;
+    this._notesBox = null;
+    this._scrollView = null;
+    this._titleEntry = null;
+    this._bodyEntry = null;
+    this._addButton = null;
+    this._notesView = null;
+    this._setupView = null;
+    this._deviceEntry = null;
+    this._syncDirEntry = null;
+    this._allowListEntry = null;
+    this._setupStatus = null;
+    this._diagnostics = null;
+    this._lanRuntimeStatus = null;
+    this._pendingOffersBox = null;
+    this._pairingCodeEntry = null;
+    this._copyPairingButton = null;
+    this._incomingPairingEntry = null;
+    this._pairLanButton = null;
+    this._prepareLanButton = null;
+    this._pairedMachines = null;
+    this._clipboard = null;
+  }
+}

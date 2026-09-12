@@ -8,7 +8,7 @@ import {NotesMenuView} from './notesMenu.js';
 
 export const TransNoteIndicator = GObject.registerClass(
 class TransNoteIndicator extends PanelMenu.Button {
-  constructor({helper, cancellable, settings}) {
+  constructor({helper, cancellable, settings, version, repositoryUrl}) {
     super(0.0, 'TransNote', false);
 
     this.add_child(new St.Icon({
@@ -20,6 +20,8 @@ class TransNoteIndicator extends PanelMenu.Button {
       helper,
       cancellable,
       settings,
+      version,
+      repositoryUrl,
     });
 
     this.menu.box.add_child(this._view.actor);

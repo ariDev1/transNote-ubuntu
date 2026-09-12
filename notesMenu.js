@@ -1,3 +1,4 @@
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
@@ -12,10 +13,12 @@ import {
 const POLL_SECONDS = 15;
 
 export class NotesMenuView {
-  constructor({helper, cancellable, settings}) {
+  constructor({helper, cancellable, settings, version, repositoryUrl}) {
     this._helper = helper;
     this._cancellable = cancellable;
     this._settings = settings;
+    this._version = String(version ?? '').trim();
+    this._repositoryUrl = String(repositoryUrl ?? '').trim();
     this._busy = false;
     this._destroyed = false;
     this._refreshBusy = false;
@@ -55,10 +58,12 @@ export class NotesMenuView {
     this._notesView = this._buildNotesView();
     this._setupView = this._buildSetupView();
     this._setupView.visible = false;
+    this._footer = this._buildFooter();
 
     this.actor.add_child(this._tabs);
     this.actor.add_child(this._notesView);
     this.actor.add_child(this._setupView);
+    this.actor.add_child(this._footer);
 
     this._pollId = GLib.timeout_add_seconds(
       GLib.PRIORITY_DEFAULT,
@@ -71,6 +76,53 @@ export class NotesMenuView {
         return GLib.SOURCE_CONTINUE;
       }
     );
+  }
+
+  _buildFooter() {
+    const footer = new St.BoxLayout({
+      style_class: 'transnote-footer',
+      x_expand: true,
+      opacity: 160,
+    });
+
+    footer.add_child(new St.Widget({
+      x_expand: true,
+    }));
+
+    if (this._version !== '') {
+      footer.add_child(new St.Label({
+        text: `v${this._version}`,
+        style_class: 'transnote-version',
+      }));
+    }
+
+    if (
+      this._version !== '' &&
+      this._repositoryUrl !== ''
+    ) {
+      footer.add_child(new St.Label({
+        text: '·',
+        style_class: 'transnote-version',
+      }));
+    }
+
+    if (this._repositoryUrl !== '') {
+      const repositoryButton = new St.Button({
+        label: 'GitHub',
+        can_focus: true,
+        reactive: true,
+        style_class: 'transnote-repository-link',
+      });
+
+      repositoryButton.connect(
+        'clicked',
+        () => this._openRepository()
+      );
+
+      footer.add_child(repositoryButton);
+    }
+
+    return footer;
   }
 
   _buildNotesView() {
@@ -683,6 +735,36 @@ export class NotesMenuView {
       box.add_child(actions);
       this._notesBox.add_child(box);
     }
+  }
+
+  _openRepository() {
+    if (
+      this._destroyed ||
+      this._repositoryUrl === ''
+    ) {
+      return;
+    }
+
+    Gio.AppInfo.launch_default_for_uri_async(
+      this._repositoryUrl,
+      null,
+      this._cancellable,
+      (_source, result) => {
+        try {
+          Gio.AppInfo.launch_default_for_uri_finish(result);
+        } catch (error) {
+          if (
+            !this._destroyed &&
+            !this._cancellable.is_cancelled()
+          ) {
+            console.error(
+              'TransNote failed to open repository',
+              error
+            );
+          }
+        }
+      }
+    );
   }
 
   _copyNote(note) {
@@ -1315,6 +1397,9 @@ export class NotesMenuView {
     this._pairLanButton = null;
     this._prepareLanButton = null;
     this._pairedMachines = null;
+    this._footer = null;
     this._clipboard = null;
+    this._repositoryUrl = '';
+    this._version = '';
   }
 }

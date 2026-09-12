@@ -18,6 +18,8 @@ export default class TransNoteExtension extends Extension {
       helper: this._helper,
       cancellable: this._cancellable,
       settings: this._settings,
+      version: this.metadata.version,
+      repositoryUrl: this.metadata.url,
     });
 
     Main.panel.addToStatusArea(

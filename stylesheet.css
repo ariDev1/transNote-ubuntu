@@ -201,3 +201,17 @@
 .transnote-comment-button {
   padding: 3px 8px;
 }
+
+.transnote-footer {
+  spacing: 5px;
+  margin-top: 2px;
+  font-size: 0.82em;
+}
+
+.transnote-version {
+  padding: 2px 0;
+}
+
+.transnote-repository-link {
+  padding: 2px 0;
+}

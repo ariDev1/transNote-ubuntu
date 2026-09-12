@@ -311,5 +311,53 @@ try {{
             self.assertFalse(staged.exists())
 
 
+    def test_staged_attachment_file_is_private(self):
+        import json
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            source = temp_path / "source.txt"
+            root = temp_path / "attachments"
+
+            source.write_bytes(b"private attachment\n")
+            source.chmod(0o644)
+
+            script = f"""
+import {{stageAttachment}} from './helper/attachments.mjs';
+
+const result = await stageAttachment({{
+  attachmentRoot: {json.dumps(str(root))},
+  noteId: 'note-1',
+  attachmentId: 'att-1',
+  fileName: 'document.txt',
+  sourcePath: {json.dumps(str(source))}
+}});
+
+console.log(result.path);
+"""
+
+            result = subprocess.run(
+                [
+                    'node',
+                    '--input-type=module',
+                    '--eval',
+                    script,
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+            staged = Path(result.stdout.strip())
+            mode = os.stat(staged).st_mode & 0o777
+
+            self.assertEqual(mode, 0o600)
+
+
 if __name__ == '__main__':
     unittest.main()

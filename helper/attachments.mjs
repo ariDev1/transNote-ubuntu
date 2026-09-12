@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {
+  chmod,
   copyFile,
   mkdir,
   readFile,
@@ -122,6 +123,7 @@ export async function stageAttachment({
   });
 
   await copyFile(sourcePath, path);
+  await chmod(path, 0o600);
 
   const verified = await verifyStagedAttachment(path);
 

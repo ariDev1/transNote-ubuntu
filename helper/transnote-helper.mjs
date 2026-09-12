@@ -740,6 +740,61 @@ async function attachmentCopyText(dataDir, config) {
 }
 
 
+async function noteColorCycle(dataDir, config) {
+  const input = await readStdinJson();
+  const id = Store.normalizeText(input.id);
+
+  if (id === '')
+    throw helperError('BAD_INPUT', 'note id is required');
+
+  const state = await loadState(dataDir);
+  const note = state.notes.find(
+    value => value && value.id === id
+  );
+
+  if (!note)
+    throw helperError('NOTE_NOT_FOUND', 'local note was not found');
+
+  const current = Store.sanitizeColor(note.color);
+  const index = Store.NOTE_COLORS.indexOf(current);
+
+  let nextColor = Store.NOTE_COLORS[0];
+
+  if (current !== '') {
+    nextColor = index >= 0 && index < Store.NOTE_COLORS.length - 1
+      ? Store.NOTE_COLORS[index + 1]
+      : '';
+  }
+
+  if (!Store.setColor(note, nextColor, config.deviceId)) {
+    throw helperError(
+      'NOT_OWNER',
+      'only the note author can change color'
+    );
+  }
+
+  state.version = 1;
+  state.deviceId = config.deviceId;
+  state.notes = Store.sortNotes(state.notes);
+
+  await saveState(dataDir, state);
+
+  if (config.configured) {
+    await writeSnapshot({
+      syncDir: config.syncDir,
+      deviceId: config.deviceId,
+      notes: state.notes,
+      outbox: state.outbox,
+    });
+  }
+
+  return {
+    ok: true,
+    note,
+  };
+}
+
+
 async function noteShare(dataDir, config) {
   const input = await readStdinJson();
   const id = Store.normalizeText(input.id);
@@ -966,6 +1021,8 @@ try {
     result = await noteCreate(dataDir, config);
   else if (command === 'note-share')
     result = await noteShare(dataDir, config);
+  else if (command === 'note-color-cycle')
+    result = await noteColorCycle(dataDir, config);
   else if (command === 'comment-add')
     result = await commentAdd(dataDir, config);
   else if (command === 'attachment-add')

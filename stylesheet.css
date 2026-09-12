@@ -33,6 +33,36 @@
   padding: 8px 10px;
 }
 
+.transnote-note-color-red {
+  background-color: rgba(229, 115, 115, 0.17);
+  border-radius: 8px;
+}
+
+.transnote-note-color-orange {
+  background-color: rgba(255, 183, 77, 0.17);
+  border-radius: 8px;
+}
+
+.transnote-note-color-yellow {
+  background-color: rgba(255, 241, 118, 0.17);
+  border-radius: 8px;
+}
+
+.transnote-note-color-green {
+  background-color: rgba(129, 199, 132, 0.17);
+  border-radius: 8px;
+}
+
+.transnote-note-color-blue {
+  background-color: rgba(100, 181, 246, 0.17);
+  border-radius: 8px;
+}
+
+.transnote-note-color-violet {
+  background-color: rgba(186, 104, 200, 0.17);
+  border-radius: 8px;
+}
+
 .transnote-note-title,
 .transnote-setup-title {
   font-weight: bold;

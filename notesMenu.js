@@ -401,9 +401,13 @@ export class NotesMenuView {
     const deviceId = this._settings.get_string('device-id').trim();
 
     for (const note of notes) {
+      const noteColorClass = note.color
+        ? ` transnote-note-color-${note.color}`
+        : '';
+
       const box = new St.BoxLayout({
         vertical: true,
-        style_class: 'transnote-note',
+        style_class: `transnote-note${noteColorClass}`,
       });
       const header = new St.BoxLayout({
         style_class: 'transnote-note-header',
@@ -636,6 +640,20 @@ export class NotesMenuView {
       actions.add_child(copyButton);
 
       if (canShare) {
+        const colorButton = new St.Button({
+          label: 'Color',
+          can_focus: true,
+          reactive: true,
+          style_class: 'button transnote-note-action',
+        });
+
+        colorButton.connect(
+          'clicked',
+          () => this._cycleColor(note.id)
+        );
+
+        actions.add_child(colorButton);
+
         const attachButton = new St.Button({
           label: 'Attach',
           can_focus: true,
@@ -1154,6 +1172,28 @@ export class NotesMenuView {
     } catch (error) {
       if (!this._destroyed && !this._cancellable.is_cancelled())
         this._setupStatus.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _cycleColor(noteId) {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    this._status.text = 'Changing color…';
+
+    try {
+      await this._helper.cycleColor(
+        noteId,
+        this._cancellable
+      );
+
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
     } finally {
       this._busy = false;
     }

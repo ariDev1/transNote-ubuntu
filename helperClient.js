@@ -12,6 +12,7 @@ const COMMANDS = new Set([
   'notes-list',
   'note-create',
   'note-share',
+  'note-color-cycle',
   'comment-add',
   'note-delete',
   'attachment-add-dialog',
@@ -152,6 +153,16 @@ export class HelperClient {
     const result = await this._run(
       'note-share',
       {id, shared},
+      cancellable
+    );
+
+    return result.note;
+  }
+
+  async cycleColor(id, cancellable = null) {
+    const result = await this._run(
+      'note-color-cycle',
+      {id},
       cancellable
     );
 

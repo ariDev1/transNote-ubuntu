@@ -138,8 +138,62 @@ async function notesList(dataDir, config) {
   }
 
   const peerNotes = peers.notes.filter(note => !mine.has(note.id));
-  const notes = Store.sortNotes(state.notes.concat(peerNotes));
 
+  if (config.configured) {
+    const prunedOutbox = Store.pruneOutbox(
+      state.outbox,
+      state.notes,
+      peerNotes
+    );
+
+    if (
+      JSON.stringify(prunedOutbox) !==
+      JSON.stringify(Store.sanitizeOutbox(state.outbox))
+    ) {
+      state.outbox = prunedOutbox;
+      await saveState(dataDir, state);
+    }
+  }
+
+  const foreignComments = Store.mergeForeignComments(
+    {},
+    peers.pairs.concat(state.outbox),
+    config.allowList,
+    config.deviceId
+  );
+
+  const displayNotes = state.notes
+    .concat(peerNotes)
+    .map(note => {
+      const clean = Store.sanitizeNote(note);
+
+      if (!clean)
+        return null;
+
+      const extra = Array.isArray(foreignComments[clean.id])
+        ? foreignComments[clean.id]
+        : [];
+
+      const known = new Set(
+        clean.comments.map(comment => comment.id)
+      );
+
+      for (const comment of extra) {
+        if (!known.has(comment.id)) {
+          clean.comments.push(comment);
+          known.add(comment.id);
+        }
+      }
+
+      clean.comments.sort((a, b) =>
+        a.createdAt < b.createdAt ? -1 : 1
+      );
+
+      return clean;
+    })
+    .filter(Boolean);
+
+  const notes = Store.sortNotes(displayNotes);
   const attachmentStates = {};
 
   if (config.configured) {
@@ -181,6 +235,105 @@ async function notesList(dataDir, config) {
       shown: notes.length,
       errors: peers.diagnostics.errors,
     },
+  };
+}
+
+async function commentAdd(dataDir, config) {
+  const input = await readStdinJson();
+  const noteId = Store.normalizeText(input.noteId);
+  const commentText = Store.normalizeText(input.text);
+
+  if (noteId === '' || commentText === '') {
+    throw helperError(
+      'BAD_INPUT',
+      'note id and comment text are required'
+    );
+  }
+
+  const state = await loadState(dataDir);
+  const localNote = state.notes.find(
+    note => note && note.id === noteId
+  );
+
+  let comment;
+
+  if (localNote) {
+    comment = Store.addComment(
+      localNote,
+      config.deviceId,
+      commentText
+    );
+
+    if (!comment) {
+      throw helperError(
+        'BAD_INPUT',
+        'comment could not be created'
+      );
+    }
+  } else {
+    if (!config.configured) {
+      throw helperError(
+        'NOTE_NOT_FOUND',
+        'note was not found'
+      );
+    }
+
+    const peers = await readPeerSnapshots({
+      syncDir: config.syncDir,
+      deviceId: config.deviceId,
+      allowList: config.allowList,
+    });
+
+    const peerNote = peers.notes.find(
+      note => note && note.id === noteId
+    );
+
+    if (!peerNote) {
+      throw helperError(
+        'NOTE_NOT_FOUND',
+        'qualified peer note was not found'
+      );
+    }
+
+    comment = Store.createComment(
+      config.deviceId,
+      commentText
+    );
+
+    if (!comment) {
+      throw helperError(
+        'BAD_INPUT',
+        'comment could not be created'
+      );
+    }
+
+    state.outbox = Store.sanitizeOutbox(
+      state.outbox.concat([{
+        noteId,
+        comment,
+      }])
+    );
+  }
+
+  state.version = 1;
+  state.deviceId = config.deviceId;
+  state.notes = Store.sortNotes(state.notes);
+
+  await saveState(dataDir, state);
+
+  if (config.configured) {
+    await writeSnapshot({
+      syncDir: config.syncDir,
+      deviceId: config.deviceId,
+      notes: state.notes,
+      outbox: state.outbox,
+    });
+  }
+
+  return {
+    ok: true,
+    noteId,
+    comment,
   };
 }
 
@@ -813,6 +966,8 @@ try {
     result = await noteCreate(dataDir, config);
   else if (command === 'note-share')
     result = await noteShare(dataDir, config);
+  else if (command === 'comment-add')
+    result = await commentAdd(dataDir, config);
   else if (command === 'attachment-add')
     result = await attachmentAdd(dataDir, config);
   else if (command === 'attachment-add-dialog')

@@ -12,6 +12,7 @@ const COMMANDS = new Set([
   'notes-list',
   'note-create',
   'note-share',
+  'comment-add',
   'note-delete',
   'attachment-add-dialog',
   'attachment-open',
@@ -135,6 +136,16 @@ export class HelperClient {
       throw new Error('helper returned no note');
 
     return result.note;
+  }
+
+  async addComment(noteId, text, cancellable = null) {
+    const result = await this._run(
+      'comment-add',
+      {noteId, text},
+      cancellable
+    );
+
+    return result.comment;
   }
 
   async setShared(id, shared, cancellable = null) {

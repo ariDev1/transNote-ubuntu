@@ -138,3 +138,36 @@
 .transnote-attachment-action {
   padding: 2px 7px;
 }
+
+.transnote-comments {
+  spacing: 5px;
+  margin-top: 6px;
+}
+
+.transnote-comment-row {
+  spacing: 2px;
+  padding: 3px 0;
+}
+
+.transnote-comment-author {
+  font-size: 0.82em;
+  font-weight: bold;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.transnote-comment-text {
+  font-size: 0.9em;
+}
+
+.transnote-comment-input-row {
+  spacing: 6px;
+  margin-top: 3px;
+}
+
+.transnote-comment-entry {
+  min-width: 220px;
+}
+
+.transnote-comment-button {
+  padding: 3px 8px;
+}

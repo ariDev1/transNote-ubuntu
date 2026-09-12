@@ -556,6 +556,72 @@ export class NotesMenuView {
         box.add_child(attachmentBox);
       }
 
+      const comments = Array.isArray(note.comments)
+        ? note.comments
+        : [];
+
+      const commentsBox = new St.BoxLayout({
+        vertical: true,
+        style_class: 'transnote-comments',
+      });
+
+      for (const comment of comments) {
+        const row = new St.BoxLayout({
+          vertical: true,
+          style_class: 'transnote-comment-row',
+        });
+
+        const author = new St.Label({
+          text: String(comment.author || 'unknown'),
+          style_class: 'transnote-comment-author',
+        });
+
+        const body = new St.Label({
+          text: String(comment.text || ''),
+          x_expand: true,
+          style_class: 'transnote-comment-text',
+        });
+
+        body.clutter_text.line_wrap = true;
+        body.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+
+        row.add_child(author);
+        row.add_child(body);
+        commentsBox.add_child(row);
+      }
+
+      const commentEntry = new St.Entry({
+        hint_text: 'Add comment',
+        can_focus: true,
+        x_expand: true,
+        style_class: 'transnote-entry transnote-comment-entry',
+      });
+
+      const commentButton = new St.Button({
+        label: 'Comment',
+        can_focus: true,
+        reactive: true,
+        style_class: 'button transnote-comment-button',
+      });
+
+      commentButton.connect(
+        'clicked',
+        () => this._addComment(
+          note.id,
+          commentEntry
+        )
+      );
+
+      const commentInputRow = new St.BoxLayout({
+        style_class: 'transnote-comment-input-row',
+      });
+
+      commentInputRow.add_child(commentEntry);
+      commentInputRow.add_child(commentButton);
+
+      commentsBox.add_child(commentInputRow);
+      box.add_child(commentsBox);
+
       const actions = new St.BoxLayout({
         style_class: 'transnote-note-actions',
       });
@@ -608,6 +674,40 @@ export class NotesMenuView {
     const text = String(note.body ?? '').replace(/\r\n/g, '\n');
     this._clipboard.set_text(St.ClipboardType.CLIPBOARD, text);
     this._status.text = 'Copied.';
+  }
+
+  async _addComment(noteId, entry) {
+    if (this._destroyed || this._busy)
+      return;
+
+    const text = entry.get_text();
+
+    if (text.trim() === '') {
+      this._status.text = 'Enter a comment.';
+      return;
+    }
+
+    this._busy = true;
+    this._status.text = 'Adding comment…';
+
+    try {
+      await this._helper.addComment(
+        noteId,
+        text,
+        this._cancellable
+      );
+
+      if (this._destroyed)
+        return;
+
+      entry.set_text('');
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
   }
 
   async _attachFile(noteId) {

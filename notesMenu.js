@@ -49,27 +49,42 @@ export class NotesMenuView {
       style_class: 'transnote-popup',
     });
 
-    this._tabs = new St.BoxLayout({
-      style_class: 'transnote-tabs',
+    this._toolbar = new St.BoxLayout({
+      style_class: 'transnote-toolbar',
     });
 
     this._notesTab = new St.Button({
       label: 'Notes',
       can_focus: true,
       reactive: true,
-      style_class: 'button transnote-tab-button',
+      style_class: 'button transnote-view-button',
+    });
+    this._newNoteButton = new St.Button({
+      label: 'New note',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-new-note-button',
     });
     this._setupTab = new St.Button({
       label: 'Setup',
       can_focus: true,
       reactive: true,
-      style_class: 'button transnote-tab-button',
+      style_class: 'button transnote-settings-button',
     });
 
     this._notesTab.connect('clicked', () => this._showView('notes'));
+    this._newNoteButton.connect(
+      'clicked',
+      () => this._setComposerVisible(true)
+    );
     this._setupTab.connect('clicked', () => this._showView('setup'));
-    this._tabs.add_child(this._notesTab);
-    this._tabs.add_child(this._setupTab);
+
+    this._toolbar.add_child(this._notesTab);
+    this._toolbar.add_child(new St.Widget({
+      x_expand: true,
+    }));
+    this._toolbar.add_child(this._newNoteButton);
+    this._toolbar.add_child(this._setupTab);
     this._notesTab.add_style_class_name('transnote-tab-active');
 
     this._notesView = this._buildNotesView();
@@ -87,7 +102,7 @@ export class NotesMenuView {
     this._setupScrollView.visible = false;
     this._footer = this._buildFooter();
 
-    this.actor.add_child(this._tabs);
+    this.actor.add_child(this._toolbar);
     this.actor.add_child(this._notesView);
     this.actor.add_child(this._setupScrollView);
     this.actor.add_child(this._footer);
@@ -197,6 +212,12 @@ export class NotesMenuView {
     );
     this._scrollView.set_child(this._notesBox);
 
+    this._composer = new St.BoxLayout({
+      vertical: true,
+      style_class: 'transnote-composer',
+      visible: false,
+    });
+
     this._titleEntry = new St.Entry({
       hint_text: 'Title',
       can_focus: true,
@@ -212,19 +233,38 @@ export class NotesMenuView {
     this._bodyEntry.clutter_text.line_wrap = true;
     this._bodyEntry.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
 
+    const composerActions = new St.BoxLayout({
+      style_class: 'transnote-composer-actions',
+    });
+    const cancelButton = new St.Button({
+      label: 'Cancel',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-cancel-button',
+    });
     this._addButton = new St.Button({
       label: 'Add note',
       can_focus: true,
       reactive: true,
       style_class: 'button transnote-add-button',
     });
+
+    cancelButton.connect('clicked', () => this._cancelComposer());
     this._addButton.connect('clicked', () => this._createNote());
 
+    composerActions.add_child(cancelButton);
+    composerActions.add_child(new St.Widget({
+      x_expand: true,
+    }));
+    composerActions.add_child(this._addButton);
+
+    this._composer.add_child(this._titleEntry);
+    this._composer.add_child(this._bodyEntry);
+    this._composer.add_child(composerActions);
+
+    view.add_child(this._composer);
     view.add_child(this._status);
     view.add_child(this._scrollView);
-    view.add_child(this._titleEntry);
-    view.add_child(this._bodyEntry);
-    view.add_child(this._addButton);
     return view;
   }
 
@@ -427,6 +467,22 @@ export class NotesMenuView {
     return view;
   }
 
+  _setComposerVisible(visible) {
+    if (this._destroyed || !this._composer)
+      return;
+
+    this._composer.visible = visible === true;
+  }
+
+  _cancelComposer() {
+    if (this._destroyed)
+      return;
+
+    this._titleEntry.set_text('');
+    this._bodyEntry.set_text('');
+    this._setComposerVisible(false);
+  }
+
   _showView(name) {
     if (this._destroyed)
       return;
@@ -434,6 +490,7 @@ export class NotesMenuView {
     const setup = name === 'setup';
     this._notesView.visible = !setup;
     this._setupScrollView.visible = setup;
+    this._newNoteButton.visible = !setup;
 
     this._notesTab.remove_style_class_name('transnote-tab-active');
     this._setupTab.remove_style_class_name('transnote-tab-active');
@@ -1423,6 +1480,7 @@ export class NotesMenuView {
 
       this._titleEntry.set_text('');
       this._bodyEntry.set_text('');
+      this._setComposerVisible(false);
       await this.refresh();
     } catch (error) {
       if (!this._destroyed && !this._cancellable.is_cancelled())

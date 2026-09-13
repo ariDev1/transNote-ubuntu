@@ -238,7 +238,7 @@ export class NotesMenuView {
     view.add_child(this._syncDirEntry);
 
     view.add_child(new St.Label({
-      text: 'Qualified peers',
+      text: 'Trusted peers',
       style_class: 'transnote-field-label',
     }));
     this._allowListEntry = new St.Entry({
@@ -248,6 +248,10 @@ export class NotesMenuView {
       text: this._settings.get_string('allow-list'),
     });
     view.add_child(this._allowListEntry);
+    view.add_child(new St.Label({
+      text: 'Only notes from these machine names are accepted.',
+      style_class: 'transnote-hint',
+    }));
 
     const actions = new St.BoxLayout({
       style_class: 'transnote-setup-actions',
@@ -298,8 +302,12 @@ export class NotesMenuView {
       style_class: 'transnote-lan-section',
     });
     lanSection.add_child(new St.Label({
-      text: 'LAN sharing',
+      text: 'LAN connection',
       style_class: 'transnote-setup-title',
+    }));
+    lanSection.add_child(new St.Label({
+      text: 'If this folder is already synchronized, no Syncthing setup is required.',
+      style_class: 'transnote-hint',
     }));
 
     this._lanRuntimeStatus = new St.Label({
@@ -320,7 +328,7 @@ export class NotesMenuView {
     this._renderPendingOffers([]);
 
     this._prepareLanButton = new St.Button({
-      label: 'Prepare LAN',
+      label: 'Set up Syncthing',
       can_focus: true,
       reactive: true,
       style_class: 'button transnote-lan-button',
@@ -329,7 +337,7 @@ export class NotesMenuView {
     lanSection.add_child(this._prepareLanButton);
 
     lanSection.add_child(new St.Label({
-      text: 'Your pairing code',
+      text: 'Your Syncthing setup code',
       style_class: 'transnote-field-label',
     }));
 
@@ -337,7 +345,7 @@ export class NotesMenuView {
       style_class: 'transnote-pair-row',
     });
     this._pairingCodeEntry = new St.Entry({
-      hint_text: 'Press Prepare LAN first',
+      hint_text: 'Select Set up Syncthing first',
       can_focus: true,
       x_expand: true,
       style_class: 'transnote-entry transnote-pair-code',
@@ -355,7 +363,7 @@ export class NotesMenuView {
     lanSection.add_child(codeRow);
 
     lanSection.add_child(new St.Label({
-      text: 'Add another machine',
+      text: 'Connect another machine',
       style_class: 'transnote-field-label',
     }));
     this._incomingPairingEntry = new St.Entry({
@@ -366,7 +374,7 @@ export class NotesMenuView {
     lanSection.add_child(this._incomingPairingEntry);
 
     this._pairLanButton = new St.Button({
-      label: 'Pair',
+      label: 'Connect',
       can_focus: true,
       reactive: true,
       style_class: 'button transnote-lan-button',
@@ -375,11 +383,11 @@ export class NotesMenuView {
     lanSection.add_child(this._pairLanButton);
 
     lanSection.add_child(new St.Label({
-      text: 'Paired machines',
+      text: 'Syncthing machines',
       style_class: 'transnote-field-label',
     }));
     this._pairedMachines = new St.Label({
-      text: 'No paired machines yet.',
+      text: 'No Syncthing machines paired. Existing folder sync can still work.',
       style_class: 'transnote-paired-list',
     });
     this._pairedMachines.clutter_text.line_wrap = true;
@@ -978,13 +986,13 @@ export class NotesMenuView {
       if (config.syncDir === '')
         throw new Error('Enter a shared folder first.');
 
-      this._setupStatus.text = 'Preparing LAN…';
+      this._setupStatus.text = 'Setting up Syncthing…';
       const result = await this._helper.prepareLan(this._cancellable);
       if (this._destroyed)
         return;
 
       this._pairingCodeEntry.set_text(String(result.pairingCode || ''));
-      this._setupStatus.text = 'LAN is prepared. Share the pairing code with the other machine.';
+      this._setupStatus.text = 'Syncthing is prepared. Share this setup code with the other machine.';
       await this._refreshLanStatus();
     } catch (error) {
       if (!this._destroyed && !this._cancellable.is_cancelled())
@@ -1000,7 +1008,7 @@ export class NotesMenuView {
 
     const code = this._pairingCodeEntry.get_text().trim();
     if (code === '') {
-      this._setupStatus.text = 'Press Prepare LAN first.';
+      this._setupStatus.text = 'Select Set up Syncthing first.';
       return;
     }
 
@@ -1020,9 +1028,9 @@ export class NotesMenuView {
 
       const pairingCode = this._incomingPairingEntry.get_text().trim();
       if (pairingCode === '')
-        throw new Error('Paste a TransNote pairing code first.');
+        throw new Error('Paste a TransNote setup code first.');
 
-      this._setupStatus.text = 'Pairing…';
+      this._setupStatus.text = 'Connecting…';
       const result = await this._helper.pairLan(
         pairingCode,
         this._cancellable
@@ -1045,7 +1053,7 @@ export class NotesMenuView {
         return;
       this._pairingCodeEntry.set_text(String(prepared.pairingCode || ''));
       this._incomingPairingEntry.set_text('');
-      this._setupStatus.text = `Paired with ${peerName}.`;
+      this._setupStatus.text = `Connected to ${peerName}.`;
       await this._refreshLanStatus();
       await this.refresh();
     } catch (error) {
@@ -1177,7 +1185,7 @@ export class NotesMenuView {
 
       const peers = Array.isArray(result.peers) ? result.peers : [];
       if (peers.length === 0) {
-        this._pairedMachines.text = 'No paired machines yet.';
+        this._pairedMachines.text = 'No Syncthing machines paired. Existing folder sync can still work.';
       } else {
         this._pairedMachines.text = peers.map(peer => {
           const state = peer.connected === true

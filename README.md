@@ -35,7 +35,7 @@ Opening TransNote clears the unread indicator. Existing notes do not create a fa
 - Ubuntu with GNOME Shell 46
 - Node.js
 - Git
-- Syncthing for LAN synchronization
+- Syncthing for the built-in LAN setup, or another tool that synchronizes the shared folder
 
 Install the required packages:
 
@@ -65,12 +65,19 @@ Open **TransNote → Setup**.
 
 1. Set a stable machine name.
 2. Set the shared folder, for example `~/transnote-lan`.
-3. Select **Prepare LAN**.
-4. Copy the pairing code to the other machine.
-5. Paste the code there and select **Pair**.
-6. Accept a pending `transnote-lan` folder in TransNote if one appears.
+3. Add the trusted TransNote machine names.
+4. Select **Save**.
 
-The normal setup does not require manual Syncthing folder IDs or the Syncthing web interface.
+If that folder is already synchronized between the machines, setup is complete. TransNote reads compatible peer snapshots directly from the folder.
+
+If the folder is not synchronized yet, use the built-in Syncthing helper:
+
+1. Select **Set up Syncthing**.
+2. Copy the setup code to the other machine.
+3. Paste the code there and select **Connect**.
+4. Accept a pending `transnote-lan` folder in TransNote if one appears.
+
+The Syncthing-assisted setup does not require manual Syncthing device IDs, folder IDs, the Syncthing web interface, or terminal commands during TransNote setup.
 
 Only notes marked as shared are written to the LAN snapshot.
 

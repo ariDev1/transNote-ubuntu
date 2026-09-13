@@ -9,7 +9,7 @@ import {NotesMenuView} from './notesMenu.js';
 
 export const TransNoteIndicator = GObject.registerClass(
 class TransNoteIndicator extends PanelMenu.Button {
-  constructor({helper, cancellable, settings, version, repositoryUrl}) {
+  constructor({helper, cancellable, settings, version, revision, repositoryUrl}) {
     super(0.0, 'TransNote', false);
 
     const iconBox = new St.Widget({
@@ -36,6 +36,7 @@ class TransNoteIndicator extends PanelMenu.Button {
       cancellable,
       settings,
       version,
+      revision,
       repositoryUrl,
       onUnreadChanged: unread => {
         if (unread && this.menu.isOpen)

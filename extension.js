@@ -8,6 +8,24 @@ import * as Main
 import {HelperClient} from './helperClient.js';
 import {TransNoteIndicator} from './indicator.js';
 
+const REVISION_FILE = '.transnote-revision';
+
+function readRevision(path) {
+  const file = Gio.File.new_for_path(`${path}/${REVISION_FILE}`);
+
+  try {
+    const [, contents] = file.load_contents(null);
+    const revision = new TextDecoder('utf-8').decode(contents).trim();
+
+    if (!/^[0-9a-f]{7,40}$/i.test(revision))
+      return '';
+
+    return revision.slice(0, 8).toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 
 export default class TransNoteExtension extends Extension {
   enable() {
@@ -18,7 +36,8 @@ export default class TransNoteExtension extends Extension {
       helper: this._helper,
       cancellable: this._cancellable,
       settings: this._settings,
-      version: this.metadata.version,
+      version: this.metadata['version-name'],
+      revision: readRevision(this.path),
       repositoryUrl: this.metadata.url,
     });
 

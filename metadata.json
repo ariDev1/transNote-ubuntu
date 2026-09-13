@@ -3,6 +3,7 @@
   "name": "TransNote",
   "description": "Shared text notes for GNOME Shell",
   "version": 4,
+  "version-name": "0.3.0",
   "shell-version": [
     "46"
   ],

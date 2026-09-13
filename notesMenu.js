@@ -19,6 +19,7 @@ export class NotesMenuView {
     cancellable,
     settings,
     version,
+    revision,
     repositoryUrl,
     onUnreadChanged,
   }) {
@@ -26,6 +27,7 @@ export class NotesMenuView {
     this._cancellable = cancellable;
     this._settings = settings;
     this._version = String(version ?? '').trim();
+    this._revision = String(revision ?? '').trim();
     this._repositoryUrl = String(repositoryUrl ?? '').trim();
     this._onUnreadChanged =
       typeof onUnreadChanged === 'function'
@@ -118,13 +120,30 @@ export class NotesMenuView {
 
     if (this._version !== '') {
       footer.add_child(new St.Label({
-        text: `v${this._version}`,
+        text: this._version,
         style_class: 'transnote-version',
       }));
     }
 
     if (
       this._version !== '' &&
+      this._revision !== ''
+    ) {
+      footer.add_child(new St.Label({
+        text: '·',
+        style_class: 'transnote-version',
+      }));
+    }
+
+    if (this._revision !== '') {
+      footer.add_child(new St.Label({
+        text: this._revision,
+        style_class: 'transnote-revision',
+      }));
+    }
+
+    if (
+      (this._version !== '' || this._revision !== '') &&
       this._repositoryUrl !== ''
     ) {
       footer.add_child(new St.Label({

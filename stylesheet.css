@@ -1,220 +1,289 @@
+/* Popup */
+
 .transnote-popup {
-  min-width: 420px;
-  max-width: 520px;
-  padding: 10px;
-  spacing: 8px;
+  min-width: 480px;
+  max-width: 580px;
+  padding: 14px;
+  spacing: 12px;
 }
 
-.transnote-tabs,
-.transnote-setup-actions,
-.transnote-note-header {
-  spacing: 6px;
+
+/* Navigation */
+
+.transnote-tabs {
+  spacing: 8px;
+  margin-bottom: 2px;
 }
 
 .transnote-tab-button {
-  min-width: 84px;
+  min-width: 112px;
+  padding: 7px 14px;
+  border-radius: 8px;
 }
+
+.transnote-tab-button.transnote-tab-active {
+  background-color: rgba(53, 132, 228, 0.24);
+  box-shadow: inset 0 -2px 0 rgba(53, 132, 228, 0.95);
+}
+
+
+/* Main views */
 
 .transnote-notes-view,
 .transnote-setup {
-  spacing: 8px;
+  spacing: 10px;
+}
+
+.transnote-status,
+.transnote-empty {
+  padding: 0 2px;
+}
+
+.transnote-setup-scroll {
+  max-height: 620px;
 }
 
 .transnote-scroll {
-  max-height: 420px;
+  max-height: 460px;
 }
 
 .transnote-section {
+  spacing: 10px;
+}
+
+
+/* Note cards */
+
+.transnote-note {
+  spacing: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.055);
+}
+
+.transnote-note-header {
   spacing: 8px;
 }
 
-.transnote-note {
-  spacing: 4px;
-  padding: 8px 10px;
-}
-
 .transnote-note-color-red {
-  background-color: rgba(229, 115, 115, 0.17);
-  border-radius: 8px;
+  background-color: rgba(229, 115, 115, 0.14);
 }
 
 .transnote-note-color-orange {
-  background-color: rgba(255, 183, 77, 0.17);
-  border-radius: 8px;
+  background-color: rgba(255, 183, 77, 0.14);
 }
 
 .transnote-note-color-yellow {
-  background-color: rgba(255, 241, 118, 0.17);
-  border-radius: 8px;
+  background-color: rgba(255, 241, 118, 0.14);
 }
 
 .transnote-note-color-green {
-  background-color: rgba(129, 199, 132, 0.17);
-  border-radius: 8px;
+  background-color: rgba(129, 199, 132, 0.14);
 }
 
 .transnote-note-color-blue {
-  background-color: rgba(100, 181, 246, 0.17);
-  border-radius: 8px;
+  background-color: rgba(100, 181, 246, 0.14);
 }
 
 .transnote-note-color-violet {
-  background-color: rgba(186, 104, 200, 0.17);
+  background-color: rgba(186, 104, 200, 0.14);
+}
+
+.transnote-note-title {
+  font-size: 1.02em;
+  font-weight: bold;
+}
+
+.transnote-note-body {
+  font-size: 1em;
+}
+
+.transnote-note-meta {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+
+/* Composer and shared fields */
+
+.transnote-entry {
+  margin-top: 2px;
+  padding: 7px 10px;
   border-radius: 8px;
 }
 
-.transnote-note-title,
+.transnote-body-entry {
+  min-height: 88px;
+}
+
+.transnote-add-button {
+  margin-top: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
+}
+
+.transnote-share-button {
+  min-width: 76px;
+}
+
+.transnote-note-actions {
+  spacing: 8px;
+  margin-top: 6px;
+}
+
+.transnote-note-action {
+  padding: 4px 9px;
+}
+
+
+/* Setup */
+
 .transnote-setup-title {
+  font-size: 1.05em;
   font-weight: bold;
 }
+
+.transnote-setup-actions {
+  spacing: 8px;
+  margin-top: 2px;
+}
+
+.transnote-field-label {
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.transnote-hint,
+.transnote-diagnostics {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.transnote-diagnostics {
+  margin-top: 2px;
+}
+
+.transnote-lan-section {
+  spacing: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.035);
+}
+
+.transnote-pair-row {
+  spacing: 8px;
+}
+
+.transnote-pair-code {
+  min-width: 300px;
+}
+
+.transnote-lan-button {
+  min-width: 104px;
+}
+
+.transnote-paired-list {
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.transnote-pending-list {
+  spacing: 5px;
+}
+
+.transnote-pending-row {
+  spacing: 8px;
+}
+
+
+/* Attachments */
+
+.transnote-attachments {
+  spacing: 5px;
+  margin-top: 7px;
+}
+
+.transnote-attachment-row {
+  spacing: 8px;
+}
+
+.transnote-attachment-state {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.transnote-attachment-action {
+  padding: 3px 8px;
+}
+
+
+/* Comments */
+
+.transnote-comments {
+  spacing: 6px;
+  margin-top: 8px;
+}
+
+.transnote-comment-row {
+  spacing: 2px;
+  padding: 4px 0;
+}
+
+.transnote-comment-author {
+  font-weight: bold;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.transnote-comment-input-row {
+  spacing: 8px;
+  margin-top: 4px;
+}
+
+.transnote-comment-entry {
+  min-width: 240px;
+}
+
+.transnote-comment-button {
+  padding: 4px 9px;
+}
+
+
+/* Secondary text */
 
 .transnote-note-meta,
 .transnote-hint,
 .transnote-field-label,
 .transnote-status,
 .transnote-empty,
-.transnote-diagnostics {
-  font-size: 0.9em;
-}
-
-.transnote-note-meta,
-.transnote-hint,
-.transnote-diagnostics {
-  color: rgba(255, 255, 255, 0.68);
-}
-
-.transnote-entry {
-  margin-top: 4px;
-}
-
-.transnote-body-entry {
-  min-height: 72px;
-}
-
-.transnote-add-button {
-  margin-top: 4px;
-}
-
-.transnote-share-button {
-  min-width: 72px;
-}
-
-.transnote-diagnostics {
-  margin-top: 4px;
-}
-
-.transnote-note-actions {
-  spacing: 6px;
-  margin-top: 4px;
-}
-
-.transnote-note-action {
-  padding: 3px 8px;
-}
-
-.transnote-lan-section {
-  spacing: 6px;
-  margin-top: 8px;
-  padding-top: 6px;
-}
-
-.transnote-pair-row {
-  spacing: 6px;
-}
-
-.transnote-pair-code {
-  min-width: 280px;
-}
-
-.transnote-lan-button {
-  min-width: 96px;
-}
-
-.transnote-paired-list {
-  font-size: 0.9em;
-  color: rgba(255, 255, 255, 0.78);
-}
-
-.transnote-pending-list {
-  spacing: 4px;
-}
-
-.transnote-pending-row {
-  spacing: 6px;
-}
-
-.transnote-pending-label {
-  font-size: 0.9em;
-}
-
-.transnote-attachments {
-  spacing: 4px;
-  margin-top: 6px;
-}
-
-.transnote-attachment-row {
-  spacing: 6px;
-}
-
-.transnote-attachment-name {
+.transnote-diagnostics,
+.transnote-paired-list,
+.transnote-pending-label,
+.transnote-attachment-name,
+.transnote-comment-text {
   font-size: 0.9em;
 }
 
 .transnote-attachment-state {
   font-size: 0.85em;
-  color: rgba(255, 255, 255, 0.68);
-}
-
-.transnote-attachment-action {
-  padding: 2px 7px;
-}
-
-.transnote-comments {
-  spacing: 5px;
-  margin-top: 6px;
-}
-
-.transnote-comment-row {
-  spacing: 2px;
-  padding: 3px 0;
 }
 
 .transnote-comment-author {
   font-size: 0.82em;
-  font-weight: bold;
-  color: rgba(255, 255, 255, 0.72);
 }
 
-.transnote-comment-text {
-  font-size: 0.9em;
-}
 
-.transnote-comment-input-row {
-  spacing: 6px;
-  margin-top: 3px;
-}
-
-.transnote-comment-entry {
-  min-width: 220px;
-}
-
-.transnote-comment-button {
-  padding: 3px 8px;
-}
+/* Footer */
 
 .transnote-footer {
-  spacing: 5px;
+  spacing: 6px;
   margin-top: 2px;
+  padding-top: 4px;
   font-size: 0.82em;
 }
 
-.transnote-version {
-  padding: 2px 0;
-}
-
+.transnote-version,
 .transnote-repository-link {
   padding: 2px 0;
 }
+
+
+/* Unread state */
 
 .transnote-unread-dot {
   min-width: 6px;

@@ -68,15 +68,26 @@ export class NotesMenuView {
     this._setupTab.connect('clicked', () => this._showView('setup'));
     this._tabs.add_child(this._notesTab);
     this._tabs.add_child(this._setupTab);
+    this._notesTab.add_style_class_name('transnote-tab-active');
 
     this._notesView = this._buildNotesView();
     this._setupView = this._buildSetupView();
-    this._setupView.visible = false;
+    this._setupScrollView = new St.ScrollView({
+      style_class: 'transnote-setup-scroll',
+      overlay_scrollbars: true,
+      x_expand: true,
+    });
+    this._setupScrollView.set_policy(
+      St.PolicyType.NEVER,
+      St.PolicyType.AUTOMATIC
+    );
+    this._setupScrollView.set_child(this._setupView);
+    this._setupScrollView.visible = false;
     this._footer = this._buildFooter();
 
     this.actor.add_child(this._tabs);
     this.actor.add_child(this._notesView);
-    this.actor.add_child(this._setupView);
+    this.actor.add_child(this._setupScrollView);
     this.actor.add_child(this._footer);
 
     this.refresh();
@@ -403,7 +414,12 @@ export class NotesMenuView {
 
     const setup = name === 'setup';
     this._notesView.visible = !setup;
-    this._setupView.visible = setup;
+    this._setupScrollView.visible = setup;
+
+    this._notesTab.remove_style_class_name('transnote-tab-active');
+    this._setupTab.remove_style_class_name('transnote-tab-active');
+    (setup ? this._setupTab : this._notesTab)
+      .add_style_class_name('transnote-tab-active');
 
     if (setup) {
       this._deviceEntry.set_text(this._settings.get_string('device-id'));

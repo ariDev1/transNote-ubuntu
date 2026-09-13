@@ -8,9 +8,10 @@ The Ubuntu port keeps the existing TransNote note model and LAN folder-sync form
 
 ## Current baseline
 
-- TransNote Version 4
+- TransNote 0.3.0
 - GNOME Shell 46
 - Extension UUID: `transnote@aridev1`
+- Footer build information: `0.3.0 · <revision> · GitHub`
 - Ubuntu ↔ Omarchy LAN sync supported
 
 ## Features
@@ -54,10 +55,29 @@ git clone \
   https://github.com/ariDev1/transNote-ubuntu.git \
   ~/.local/share/gnome-shell/extensions/transnote@aridev1
 
+git -C ~/.local/share/gnome-shell/extensions/transnote@aridev1 \
+  rev-parse --short=8 HEAD \
+  > ~/.local/share/gnome-shell/extensions/transnote@aridev1/.transnote-revision
+
 gnome-extensions enable transnote@aridev1
 ```
 
+The local `.transnote-revision` file supplies the short Git revision shown in the footer. It is not committed to the repository.
+
 If GNOME does not detect the extension immediately, log out and log in again.
+
+## Updating
+
+```bash
+EXTENSION_DIR="$HOME/.local/share/gnome-shell/extensions/transnote@aridev1"
+
+git -C "$EXTENSION_DIR" pull --ff-only
+
+git -C "$EXTENSION_DIR" rev-parse --short=8 HEAD \
+  > "$EXTENSION_DIR/.transnote-revision"
+```
+
+After an update, log out and log in again if GNOME Shell does not reload the extension.
 
 ## LAN setup
 

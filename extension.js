@@ -1,4 +1,5 @@
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 
 import {Extension}
   from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -7,6 +8,7 @@ import * as Main
 
 import {HelperClient} from './helperClient.js';
 import {TransNoteIndicator} from './indicator.js';
+import {setupDefaults} from './setupDefaults.js';
 
 const REVISION_FILE = '.transnote-revision';
 
@@ -26,11 +28,43 @@ function readRevision(path) {
   }
 }
 
+function readMachineSeed() {
+  const file = Gio.File.new_for_path('/etc/machine-id');
+
+  try {
+    const [, contents] = file.load_contents(null);
+    const machineId = new TextDecoder('utf-8').decode(contents).trim();
+
+    if (machineId !== '')
+      return machineId;
+  } catch {
+    // Use the hostname only when the Linux machine id is unavailable.
+  }
+
+  return GLib.get_host_name();
+}
+
+function ensureSetupDefaults(settings) {
+  const defaults = setupDefaults({
+    deviceId: settings.get_string('device-id'),
+    syncDir: settings.get_string('sync-dir'),
+    seed: readMachineSeed(),
+    homeDir: GLib.get_home_dir(),
+  });
+
+  if (!defaults.initialized)
+    return;
+
+  settings.set_string('device-id', defaults.deviceId);
+  settings.set_string('sync-dir', defaults.syncDir);
+}
+
 
 export default class TransNoteExtension extends Extension {
   enable() {
     this._cancellable = new Gio.Cancellable();
     this._settings = this.getSettings();
+    ensureSetupDefaults(this._settings);
     this._helper = new HelperClient(this.path, this._settings);
     this._indicator = new TransNoteIndicator({
       helper: this._helper,

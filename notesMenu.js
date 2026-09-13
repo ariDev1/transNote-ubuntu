@@ -76,7 +76,7 @@ export class NotesMenuView {
     this._setupView = this._buildSetupView();
     this._setupScrollView = new St.ScrollView({
       style_class: 'transnote-setup-scroll',
-      overlay_scrollbars: true,
+      overlay_scrollbars: false,
       x_expand: true,
     });
     this._setupScrollView.set_policy(
@@ -189,7 +189,7 @@ export class NotesMenuView {
 
     this._scrollView = new St.ScrollView({
       style_class: 'transnote-scroll',
-      overlay_scrollbars: true,
+      overlay_scrollbars: false,
     });
     this._scrollView.set_policy(
       St.PolicyType.NEVER,

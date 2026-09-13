@@ -170,6 +170,24 @@
   font-weight: bold;
 }
 
+.transnote-machine-name {
+  font-size: 1.05em;
+  font-weight: bold;
+  padding: 2px 0 4px 0;
+}
+
+.transnote-advanced-button {
+  margin-top: 4px;
+}
+
+.transnote-advanced-setup {
+  spacing: 8px;
+  margin-top: 2px;
+  padding: 10px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.025);
+}
+
 .transnote-setup-actions {
   spacing: 8px;
   margin-top: 2px;

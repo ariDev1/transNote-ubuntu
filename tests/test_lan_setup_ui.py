@@ -8,30 +8,73 @@ ROOT = Path(__file__).resolve().parents[1]
 class LanSetupUiTests(unittest.TestCase):
     def setUp(self):
         self.source = (ROOT / "notesMenu.js").read_text()
+        self.styles = (ROOT / "stylesheet.css").read_text()
 
-    def test_setup_explains_trusted_peer_filter(self):
+    def test_normal_setup_focuses_on_device_pairing(self):
+        for text in (
+            "text: 'Device sync'",
+            "text: 'This computer'",
+            "label: 'Enable device sync'",
+            "text: 'Your setup code'",
+            "text: 'Connect another computer'",
+            "text: 'Connected computers'",
+        ):
+            self.assertIn(text, self.source)
+
+    def test_technical_fields_are_hidden_in_advanced_section(self):
+        self.assertIn("this._advancedSetup = new St.BoxLayout({", self.source)
+        self.assertIn("visible: false", self.source)
+        self.assertIn("label: 'Advanced'", self.source)
+        self.assertIn("text: 'Machine name'", self.source)
+        self.assertIn("text: 'Shared folder'", self.source)
         self.assertIn("text: 'Trusted peers'", self.source)
+
+    def test_advanced_button_has_real_toggle_method(self):
+        self.assertIn("_toggleAdvancedSetup()", self.source)
         self.assertIn(
-            "Only notes from these machine names are accepted.",
+            "this._advancedSetup.visible = !this._advancedSetup.visible;",
             self.source,
         )
 
-    def test_syncthing_setup_is_presented_as_optional_transport(self):
-        self.assertIn("label: 'Set up Syncthing'", self.source)
+    def test_pairing_still_qualifies_trusted_peer(self):
         self.assertIn(
-            "If this folder is already synchronized, no Syncthing setup is required.",
+            "const updated = addQualifiedPeer(current, peerName);",
             self.source,
         )
-        self.assertIn("text: 'Your Syncthing setup code'", self.source)
-        self.assertIn("text: 'Connect another machine'", self.source)
-        self.assertIn("label: 'Connect'", self.source)
-        self.assertNotIn("label: 'Prepare LAN'", self.source)
+        self.assertIn(
+            "this._settings.set_string('allow-list', updated);",
+            self.source,
+        )
 
-    def test_no_pair_status_does_not_block_external_folder_sync(self):
+    def test_pending_folder_acceptance_remains_available(self):
+        self.assertIn("text: 'Pending TransNote folders'", self.source)
+        self.assertIn("this._renderPendingOffers([]);", self.source)
+        self.assertIn("label: 'Accept'", self.source)
+
+    def test_primary_wording_hides_transport_details(self):
+        self.assertNotIn("text: 'LAN connection'", self.source)
+        self.assertNotIn("label: 'Set up Syncthing'", self.source)
+        self.assertNotIn("text: 'Your Syncthing setup code'", self.source)
         self.assertIn(
-            "No Syncthing machines paired. Existing folder sync can still work.",
+            "Existing synchronized folders remain supported.",
             self.source,
         )
+
+    def test_machine_name_label_tracks_advanced_edit(self):
+        self.assertIn("this._machineNameLabel.text = deviceId;", self.source)
+        self.assertIn("this._machineNameLabel.text =", self.source)
+        self.assertIn(
+            "this._settings.get_string('device-id');",
+            self.source,
+        )
+
+    def test_setup_styles_keep_advanced_controls_structured(self):
+        for selector in (
+            ".transnote-machine-name",
+            ".transnote-advanced-button",
+            ".transnote-advanced-setup",
+        ):
+            self.assertIn(selector, self.styles)
 
 
 if __name__ == "__main__":

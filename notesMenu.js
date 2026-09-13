@@ -275,27 +275,138 @@ export class NotesMenuView {
     });
 
     view.add_child(new St.Label({
-      text: 'LAN folder sync',
+      text: 'Device sync',
       style_class: 'transnote-setup-title',
-    }));
-    view.add_child(new St.Label({
-      text: 'Keep the machine name stable after sharing notes.',
-      style_class: 'transnote-hint',
     }));
 
     view.add_child(new St.Label({
+      text: 'This computer',
+      style_class: 'transnote-field-label',
+    }));
+    this._machineNameLabel = new St.Label({
+      text: this._settings.get_string('device-id'),
+      style_class: 'transnote-machine-name',
+    });
+    view.add_child(this._machineNameLabel);
+
+    this._prepareLanButton = new St.Button({
+      label: 'Enable device sync',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-lan-button',
+    });
+    this._prepareLanButton.connect('clicked', () => this._prepareLan());
+    view.add_child(this._prepareLanButton);
+
+    view.add_child(new St.Label({
+      text: 'Your setup code',
+      style_class: 'transnote-field-label',
+    }));
+
+    const codeRow = new St.BoxLayout({
+      style_class: 'transnote-pair-row',
+    });
+    this._pairingCodeEntry = new St.Entry({
+      hint_text: 'Select Enable device sync first',
+      can_focus: true,
+      x_expand: true,
+      style_class: 'transnote-entry transnote-pair-code',
+    });
+    this._pairingCodeEntry.clutter_text.editable = false;
+    this._copyPairingButton = new St.Button({
+      label: 'Copy code',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button',
+    });
+    this._copyPairingButton.connect('clicked', () => this._copyPairingCode());
+    codeRow.add_child(this._pairingCodeEntry);
+    codeRow.add_child(this._copyPairingButton);
+    view.add_child(codeRow);
+
+    view.add_child(new St.Label({
+      text: 'Connect another computer',
+      style_class: 'transnote-field-label',
+    }));
+    this._incomingPairingEntry = new St.Entry({
+      hint_text: 'Paste TransNote setup code',
+      can_focus: true,
+      style_class: 'transnote-entry',
+    });
+    view.add_child(this._incomingPairingEntry);
+
+    this._pairLanButton = new St.Button({
+      label: 'Connect',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-lan-button',
+    });
+    this._pairLanButton.connect('clicked', () => this._pairLan());
+    view.add_child(this._pairLanButton);
+
+    view.add_child(new St.Label({
+      text: 'Pending TransNote folders',
+      style_class: 'transnote-field-label',
+    }));
+    this._pendingOffersBox = new St.BoxLayout({
+      vertical: true,
+      style_class: 'transnote-pending-list',
+    });
+    view.add_child(this._pendingOffersBox);
+    this._renderPendingOffers([]);
+
+    view.add_child(new St.Label({
+      text: 'Connected computers',
+      style_class: 'transnote-field-label',
+    }));
+    this._pairedMachines = new St.Label({
+      text: 'No computers connected yet.',
+      style_class: 'transnote-paired-list',
+    });
+    this._pairedMachines.clutter_text.line_wrap = true;
+    view.add_child(this._pairedMachines);
+
+    this._setupStatus = new St.Label({
+      text: 'Device sync is ready to configure.',
+      style_class: 'transnote-status',
+    });
+    view.add_child(this._setupStatus);
+
+    this._advancedButton = new St.Button({
+      label: 'Advanced',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-advanced-button',
+    });
+    this._advancedButton.connect(
+      'clicked',
+      () => this._toggleAdvancedSetup()
+    );
+    view.add_child(this._advancedButton);
+
+    this._advancedSetup = new St.BoxLayout({
+      vertical: true,
+      visible: false,
+      style_class: 'transnote-advanced-setup',
+    });
+
+    this._advancedSetup.add_child(new St.Label({
       text: 'Machine name',
       style_class: 'transnote-field-label',
     }));
     this._deviceEntry = new St.Entry({
-      hint_text: 'desktop',
+      hint_text: 'WarpCoreCoffee',
       can_focus: true,
       style_class: 'transnote-entry',
       text: this._settings.get_string('device-id'),
     });
-    view.add_child(this._deviceEntry);
+    this._advancedSetup.add_child(this._deviceEntry);
+    this._advancedSetup.add_child(new St.Label({
+      text: 'Keep this name stable after sharing notes.',
+      style_class: 'transnote-hint',
+    }));
 
-    view.add_child(new St.Label({
+    this._advancedSetup.add_child(new St.Label({
       text: 'Shared folder',
       style_class: 'transnote-field-label',
     }));
@@ -305,21 +416,21 @@ export class NotesMenuView {
       style_class: 'transnote-entry',
       text: this._settings.get_string('sync-dir'),
     });
-    view.add_child(this._syncDirEntry);
+    this._advancedSetup.add_child(this._syncDirEntry);
 
-    view.add_child(new St.Label({
+    this._advancedSetup.add_child(new St.Label({
       text: 'Trusted peers',
       style_class: 'transnote-field-label',
     }));
     this._allowListEntry = new St.Entry({
-      hint_text: 'laptop,desktop',
+      hint_text: 'QDidIt,TeaEarlGreyHot',
       can_focus: true,
       style_class: 'transnote-entry',
       text: this._settings.get_string('allow-list'),
     });
-    view.add_child(this._allowListEntry);
-    view.add_child(new St.Label({
-      text: 'Only notes from these machine names are accepted.',
+    this._advancedSetup.add_child(this._allowListEntry);
+    this._advancedSetup.add_child(new St.Label({
+      text: 'Pairing updates this list automatically.',
       style_class: 'transnote-hint',
     }));
 
@@ -353,117 +464,25 @@ export class NotesMenuView {
     actions.add_child(this._createFolderButton);
     actions.add_child(this._saveSetupButton);
     actions.add_child(this._checkNowButton);
-    view.add_child(actions);
+    this._advancedSetup.add_child(actions);
 
-    this._setupStatus = new St.Label({
-      text: 'Setup values are stored for this GNOME user.',
-      style_class: 'transnote-status',
-    });
     this._diagnostics = new St.Label({
       text: 'LAN: not configured',
       style_class: 'transnote-diagnostics',
     });
-
-    view.add_child(this._setupStatus);
-    view.add_child(this._diagnostics);
-
-    const lanSection = new St.BoxLayout({
-      vertical: true,
-      style_class: 'transnote-lan-section',
-    });
-    lanSection.add_child(new St.Label({
-      text: 'LAN connection',
-      style_class: 'transnote-setup-title',
-    }));
-    lanSection.add_child(new St.Label({
-      text: 'If this folder is already synchronized, no Syncthing setup is required.',
-      style_class: 'transnote-hint',
-    }));
+    this._advancedSetup.add_child(this._diagnostics);
 
     this._lanRuntimeStatus = new St.Label({
       text: 'Syncthing: not checked',
       style_class: 'transnote-diagnostics',
     });
-    lanSection.add_child(this._lanRuntimeStatus);
-
-    lanSection.add_child(new St.Label({
-      text: 'Pending TransNote folders',
-      style_class: 'transnote-field-label',
-    }));
-    this._pendingOffersBox = new St.BoxLayout({
-      vertical: true,
-      style_class: 'transnote-pending-list',
-    });
-    lanSection.add_child(this._pendingOffersBox);
-    this._renderPendingOffers([]);
-
-    this._prepareLanButton = new St.Button({
-      label: 'Set up Syncthing',
-      can_focus: true,
-      reactive: true,
-      style_class: 'button transnote-lan-button',
-    });
-    this._prepareLanButton.connect('clicked', () => this._prepareLan());
-    lanSection.add_child(this._prepareLanButton);
-
-    lanSection.add_child(new St.Label({
-      text: 'Your Syncthing setup code',
-      style_class: 'transnote-field-label',
+    this._advancedSetup.add_child(this._lanRuntimeStatus);
+    this._advancedSetup.add_child(new St.Label({
+      text: 'Existing synchronized folders remain supported.',
+      style_class: 'transnote-hint',
     }));
 
-    const codeRow = new St.BoxLayout({
-      style_class: 'transnote-pair-row',
-    });
-    this._pairingCodeEntry = new St.Entry({
-      hint_text: 'Select Set up Syncthing first',
-      can_focus: true,
-      x_expand: true,
-      style_class: 'transnote-entry transnote-pair-code',
-    });
-    this._pairingCodeEntry.clutter_text.editable = false;
-    this._copyPairingButton = new St.Button({
-      label: 'Copy code',
-      can_focus: true,
-      reactive: true,
-      style_class: 'button',
-    });
-    this._copyPairingButton.connect('clicked', () => this._copyPairingCode());
-    codeRow.add_child(this._pairingCodeEntry);
-    codeRow.add_child(this._copyPairingButton);
-    lanSection.add_child(codeRow);
-
-    lanSection.add_child(new St.Label({
-      text: 'Connect another machine',
-      style_class: 'transnote-field-label',
-    }));
-    this._incomingPairingEntry = new St.Entry({
-      hint_text: 'Paste TN1 pairing code',
-      can_focus: true,
-      style_class: 'transnote-entry',
-    });
-    lanSection.add_child(this._incomingPairingEntry);
-
-    this._pairLanButton = new St.Button({
-      label: 'Connect',
-      can_focus: true,
-      reactive: true,
-      style_class: 'button transnote-lan-button',
-    });
-    this._pairLanButton.connect('clicked', () => this._pairLan());
-    lanSection.add_child(this._pairLanButton);
-
-    lanSection.add_child(new St.Label({
-      text: 'Syncthing machines',
-      style_class: 'transnote-field-label',
-    }));
-    this._pairedMachines = new St.Label({
-      text: 'No Syncthing machines paired. Existing folder sync can still work.',
-      style_class: 'transnote-paired-list',
-    });
-    this._pairedMachines.clutter_text.line_wrap = true;
-    lanSection.add_child(this._pairedMachines);
-
-    view.add_child(lanSection);
+    view.add_child(this._advancedSetup);
     return view;
   }
 
@@ -483,6 +502,13 @@ export class NotesMenuView {
     this._setComposerVisible(false);
   }
 
+  _toggleAdvancedSetup() {
+    if (this._destroyed || !this._advancedSetup)
+      return;
+
+    this._advancedSetup.visible = !this._advancedSetup.visible;
+  }
+
   _showView(name) {
     if (this._destroyed)
       return;
@@ -498,6 +524,8 @@ export class NotesMenuView {
       .add_style_class_name('transnote-tab-active');
 
     if (setup) {
+      this._machineNameLabel.text =
+        this._settings.get_string('device-id');
       this._deviceEntry.set_text(this._settings.get_string('device-id'));
       this._syncDirEntry.set_text(this._settings.get_string('sync-dir'));
       this._allowListEntry.set_text(this._settings.get_string('allow-list'));
@@ -1078,13 +1106,14 @@ export class NotesMenuView {
       if (config.syncDir === '')
         throw new Error('Enter a shared folder first.');
 
-      this._setupStatus.text = 'Setting up Syncthing…';
+      this._setupStatus.text = 'Enabling device sync…';
       const result = await this._helper.prepareLan(this._cancellable);
       if (this._destroyed)
         return;
 
       this._pairingCodeEntry.set_text(String(result.pairingCode || ''));
-      this._setupStatus.text = 'Syncthing is prepared. Share this setup code with the other machine.';
+      this._setupStatus.text =
+        'Device sync is ready. Share this setup code with the other computer.';
       await this._refreshLanStatus();
     } catch (error) {
       if (!this._destroyed && !this._cancellable.is_cancelled())
@@ -1100,7 +1129,7 @@ export class NotesMenuView {
 
     const code = this._pairingCodeEntry.get_text().trim();
     if (code === '') {
-      this._setupStatus.text = 'Select Set up Syncthing first.';
+      this._setupStatus.text = 'Select Enable device sync first.';
       return;
     }
 
@@ -1277,7 +1306,7 @@ export class NotesMenuView {
 
       const peers = Array.isArray(result.peers) ? result.peers : [];
       if (peers.length === 0) {
-        this._pairedMachines.text = 'No Syncthing machines paired. Existing folder sync can still work.';
+        this._pairedMachines.text = 'No computers connected yet.';
       } else {
         this._pairedMachines.text = peers.map(peer => {
           const state = peer.connected === true
@@ -1309,6 +1338,8 @@ export class NotesMenuView {
     this._settings.set_string('device-id', deviceId);
     this._settings.set_string('sync-dir', syncDir);
     this._settings.set_string('allow-list', allowList);
+
+    this._machineNameLabel.text = deviceId;
 
     return {deviceId, syncDir, allowList};
   }
@@ -1515,9 +1546,12 @@ export class NotesMenuView {
     this._addButton = null;
     this._notesView = null;
     this._setupView = null;
+    this._machineNameLabel = null;
     this._deviceEntry = null;
     this._syncDirEntry = null;
     this._allowListEntry = null;
+    this._advancedButton = null;
+    this._advancedSetup = null;
     this._setupStatus = null;
     this._diagnostics = null;
     this._lanRuntimeStatus = null;

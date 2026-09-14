@@ -22,7 +22,12 @@ import {
   saveAttachmentCopy,
   stageAttachment,
 } from './attachments.mjs';
-import {loadState, resolveDataDir, saveState} from './storage.mjs';
+import {
+  loadState,
+  resolveDataDir,
+  sanitizeHidden,
+  saveState,
+} from './storage.mjs';
 import {decodePairingCode, loadLanPeers, saveLanPeer} from './lan-pairing.mjs';
 import {createExecFileRunner, createSyncthingControl} from './syncthing-control.mjs';
 import {
@@ -153,6 +158,10 @@ async function notesList(dataDir, config) {
   const peerNotes = livePeerNotes.filter(
     note => !isDeleted(deletedIds, note.id)
   );
+  const hiddenIds = new Set(sanitizeHidden(state.hiddenIds));
+  const visiblePeerNotes = peerNotes.filter(
+    note => !hiddenIds.has(note.id)
+  );
   const peerPairs = peers.pairs.filter(
     entry => entry && !isDeleted(deletedIds, entry.noteId)
   );
@@ -187,7 +196,7 @@ async function notesList(dataDir, config) {
   );
 
   const displayNotes = state.notes
-    .concat(peerNotes)
+    .concat(visiblePeerNotes)
     .map(note => {
       const clean = Store.sanitizeNote(note);
 
@@ -221,7 +230,7 @@ async function notesList(dataDir, config) {
   const attachmentStates = {};
 
   if (config.configured) {
-    for (const note of peerNotes) {
+    for (const note of visiblePeerNotes) {
       const attachments = Array.isArray(note.attachments)
         ? note.attachments
         : [];
@@ -249,13 +258,14 @@ async function notesList(dataDir, config) {
     ok: true,
     notes,
     localIds,
+    hiddenCount: sanitizeHidden(state.hiddenIds).length,
     attachmentStates,
     diagnostics: {
       configured: config.configured,
       files: peers.diagnostics.files,
       fetched: peers.diagnostics.fetched,
       snapNotes: peers.diagnostics.snapNotes,
-      peerNotes: peerNotes.length,
+      peerNotes: visiblePeerNotes.length,
       shown: notes.length,
       errors: peers.diagnostics.errors,
     },
@@ -953,6 +963,78 @@ async function noteDelete(dataDir, config) {
   };
 }
 
+async function noteHide(dataDir, config) {
+  const input = await readStdinJson();
+  const id = Store.normalizeText(input.id);
+
+  if (id === '')
+    throw helperError('BAD_INPUT', 'note id is required');
+
+  const state = await loadState(dataDir);
+
+  if (state.notes.some(note => note && note.id === id)) {
+    throw helperError(
+      'LOCAL_NOTE',
+      'local notes must use delete instead of hide'
+    );
+  }
+
+  if (!config.configured)
+    throw helperError('NOTE_NOT_FOUND', 'qualified peer note was not found');
+
+  const peers = await readPeerSnapshots({
+    syncDir: config.syncDir,
+    deviceId: config.deviceId,
+    allowList: config.allowList,
+  });
+  const effectiveDeleted = reconcileDeleted(
+    mergeDeleted(state.deletedIds, peers.deletedIds),
+    peers.notes
+  );
+  const peerNote = peers.notes.find(
+    note => note &&
+      note.id === id &&
+      !isDeleted(effectiveDeleted, note.id)
+  );
+
+  state.deletedIds = effectiveDeleted;
+
+  if (!peerNote) {
+    await saveState(dataDir, state);
+    throw helperError(
+      'NOTE_NOT_FOUND',
+      'qualified peer note was not found'
+    );
+  }
+
+  state.hiddenIds = sanitizeHidden(
+    state.hiddenIds.concat([id])
+  );
+  state.version = 2;
+  state.deviceId = config.deviceId;
+  await saveState(dataDir, state);
+
+  return {
+    ok: true,
+    hiddenId: id,
+  };
+}
+
+async function notesUnhideAll(dataDir, config) {
+  const state = await loadState(dataDir);
+  const hiddenCount = sanitizeHidden(state.hiddenIds).length;
+
+  state.hiddenIds = [];
+  state.version = 2;
+  state.deviceId = config.deviceId;
+  await saveState(dataDir, state);
+
+  return {
+    ok: true,
+    unhidden: hiddenCount,
+  };
+}
+
 async function syncNow(dataDir, config) {
   if (!config.configured)
     throw helperError('SYNC_NOT_CONFIGURED', 'device id and sync folder are required');
@@ -1107,6 +1189,10 @@ try {
     result = await noteColorCycle(dataDir, config);
   else if (command === 'comment-add')
     result = await commentAdd(dataDir, config);
+  else if (command === 'note-hide')
+    result = await noteHide(dataDir, config);
+  else if (command === 'notes-unhide-all')
+    result = await notesUnhideAll(dataDir, config);
   else if (command === 'attachment-add')
     result = await attachmentAdd(dataDir, config);
   else if (command === 'attachment-add-dialog')

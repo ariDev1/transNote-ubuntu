@@ -16,6 +16,35 @@ import {sanitizeDeleted} from './tombstones.mjs';
 const require = createRequire(import.meta.url);
 const Store = require('../core/Store.js');
 
+export const MAX_HIDDEN = 1000;
+
+export function sanitizeHidden(raw) {
+  const out = [];
+  const seen = new Set();
+  const values = Array.isArray(raw) ? raw : [];
+
+  for (const entry of values) {
+    const id = Store.normalizeText(
+      typeof entry === 'string'
+        ? entry
+        : entry && typeof entry === 'object'
+          ? entry.id
+          : ''
+    );
+
+    if (id === '' || seen.has(id))
+      continue;
+
+    seen.add(id);
+    out.push(id);
+
+    if (out.length >= MAX_HIDDEN)
+      break;
+  }
+
+  return out;
+}
+
 export function resolveDataDir(env = process.env) {
   const base = env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
   return env.TRANSNOTE_DATA_DIR || join(base, 'transnote');
@@ -28,6 +57,7 @@ function emptyState() {
     notes: [],
     outbox: [],
     deletedIds: {},
+    hiddenIds: [],
   };
 }
 
@@ -48,6 +78,7 @@ function sanitizeState(parsed) {
     notes,
     outbox: Store.sanitizeOutbox(parsed?.outbox),
     deletedIds: sanitizeDeleted(parsed?.deletedIds ?? parsed?.deleted),
+    hiddenIds: sanitizeHidden(parsed?.hiddenIds ?? parsed?.hidden),
   };
 }
 

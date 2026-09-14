@@ -40,6 +40,9 @@ export class NotesMenuView {
     this._refreshBusy = false;
     this._refreshPending = false;
     this._localIds = new Set();
+    this._commentDrafts = new Map();
+    this._commentFocusedNoteId = '';
+    this._commentSubmitNoteId = '';
     this._diagnosticState = null;
     this._lanStatusBusy = false;
     this._clipboard = St.Clipboard.get_default();
@@ -197,6 +200,23 @@ export class NotesMenuView {
       style_class: 'transnote-status',
     });
 
+    const statusRow = new St.BoxLayout();
+    statusRow.add_child(this._status);
+    statusRow.add_child(new St.Widget({x_expand: true}));
+
+    this._unhideAllButton = new St.Button({
+      label: 'Unhide all',
+      can_focus: true,
+      reactive: true,
+      visible: false,
+      style_class: 'button transnote-note-action',
+    });
+    this._unhideAllButton.connect(
+      'clicked',
+      () => this._unhideAll()
+    );
+    statusRow.add_child(this._unhideAllButton);
+
     this._notesBox = new St.BoxLayout({
       vertical: true,
       style_class: 'transnote-section',
@@ -263,7 +283,7 @@ export class NotesMenuView {
     this._composer.add_child(composerActions);
 
     view.add_child(this._composer);
-    view.add_child(this._status);
+    view.add_child(statusRow);
     view.add_child(this._scrollView);
     return view;
   }
@@ -621,7 +641,18 @@ export class NotesMenuView {
           ? result.attachmentStates
           : {};
 
-      this._renderNotes(notes, attachmentStates);
+      const hiddenCount = Number.isInteger(result.hiddenCount)
+        ? result.hiddenCount
+        : 0;
+      this._unhideAllButton.visible = hiddenCount > 0;
+
+      if (
+        this._commentFocusedNoteId === '' &&
+        this._commentSubmitNoteId === ''
+      ) {
+        this._renderNotes(notes, attachmentStates);
+      }
+
       this._updateDiagnostics(this._diagnosticState);
       this._status.text = `${notes.length} note${notes.length === 1 ? '' : 's'}`;
     } catch (error) {
@@ -852,6 +883,28 @@ export class NotesMenuView {
         style_class: 'transnote-entry transnote-comment-entry',
       });
 
+      const draft = this._commentDrafts.get(note.id);
+      if (typeof draft === 'string' && draft !== '')
+        commentEntry.set_text(draft);
+
+      commentEntry.clutter_text.connect('text-changed', () => {
+        const value = commentEntry.get_text();
+        if (value === '')
+          this._commentDrafts.delete(note.id);
+        else
+          this._commentDrafts.set(note.id, value);
+      });
+      commentEntry.clutter_text.connect('key-focus-in', () => {
+        this._commentFocusedNoteId = note.id;
+      });
+      commentEntry.clutter_text.connect('key-focus-out', () => {
+        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+          if (this._commentFocusedNoteId === note.id)
+            this._commentFocusedNoteId = '';
+          return GLib.SOURCE_REMOVE;
+        });
+      });
+
       const commentButton = new St.Button({
         label: 'Comment',
         can_focus: true,
@@ -929,6 +982,15 @@ export class NotesMenuView {
         });
         deleteButton.connect('clicked', () => this._deleteNote(note.id));
         actions.add_child(deleteButton);
+      } else {
+        const hideButton = new St.Button({
+          label: 'Hide',
+          can_focus: true,
+          reactive: true,
+          style_class: 'button transnote-note-action',
+        });
+        hideButton.connect('clicked', () => this._hideNote(note.id));
+        actions.add_child(hideButton);
       }
 
       box.add_child(actions);
@@ -979,9 +1041,16 @@ export class NotesMenuView {
     if (this._destroyed || this._busy)
       return;
 
-    const text = entry.get_text();
+    this._commentSubmitNoteId = noteId;
+    this._commentFocusedNoteId = '';
+
+    const draft = this._commentDrafts.get(noteId);
+    const text = typeof draft === 'string'
+      ? draft
+      : entry.get_text();
 
     if (text.trim() === '') {
+      this._commentSubmitNoteId = '';
       this._status.text = 'Enter a comment.';
       return;
     }
@@ -1000,11 +1069,14 @@ export class NotesMenuView {
         return;
 
       entry.set_text('');
+      this._commentDrafts.delete(noteId);
+      this._commentSubmitNoteId = '';
       await this.refresh();
     } catch (error) {
       if (!this._destroyed && !this._cancellable.is_cancelled())
         this._status.text = `Error: ${error.message}`;
     } finally {
+      this._commentSubmitNoteId = '';
       this._busy = false;
     }
   }
@@ -1111,6 +1183,43 @@ export class NotesMenuView {
       if (!this._destroyed)
         this._status.text =
           `Saved: ${String(result.savedPath || '')}`;
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _hideNote(noteId) {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    this._status.text = 'Hiding…';
+
+    try {
+      await this._helper.hideNote(noteId, this._cancellable);
+      this._commentDrafts.delete(noteId);
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._status.text = `Error: ${error.message}`;
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _unhideAll() {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    this._status.text = 'Restoring hidden notes…';
+
+    try {
+      await this._helper.unhideAll(this._cancellable);
+      await this.refresh();
     } catch (error) {
       if (!this._destroyed && !this._cancellable.is_cancelled())
         this._status.text = `Error: ${error.message}`;

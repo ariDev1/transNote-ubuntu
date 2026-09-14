@@ -22,6 +22,21 @@ class CommentUiTests(unittest.TestCase):
         self.assertIn("this._helper.addComment(", source)
         self.assertIn("_addComment(", source)
 
+    def test_comment_draft_survives_poll_refresh_while_editing(self):
+        source = (ROOT / "notesMenu.js").read_text()
+
+        self.assertIn("this._commentDrafts = new Map()", source)
+        self.assertIn("this._commentFocusedNoteId = ''", source)
+        self.assertIn("this._commentSubmitNoteId = ''", source)
+        self.assertIn("'key-focus-in'", source)
+        self.assertIn("'key-focus-out'", source)
+        self.assertIn("this._commentDrafts.get(note.id)", source)
+        self.assertIn("this._commentFocusedNoteId === ''", source)
+        self.assertIn("this._commentSubmitNoteId === ''", source)
+        load_at = source.index("const result = await this._helper.loadNotes")
+        render_guard_at = source.index("this._commentFocusedNoteId === ''")
+        self.assertLess(load_at, render_guard_at)
+
     def test_comment_styles_are_structured(self):
         source = (ROOT / "stylesheet.css").read_text()
 

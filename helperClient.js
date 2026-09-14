@@ -14,6 +14,8 @@ const COMMANDS = new Set([
   'note-share',
   'note-color-cycle',
   'comment-add',
+  'note-hide',
+  'notes-unhide-all',
   'note-delete',
   'attachment-add-dialog',
   'attachment-open',
@@ -168,6 +170,22 @@ export class HelperClient {
     );
 
     return result.note;
+  }
+
+  async hideNote(id, cancellable = null) {
+    return this._run(
+      'note-hide',
+      {id},
+      cancellable
+    );
+  }
+
+  async unhideAll(cancellable = null) {
+    return this._run(
+      'notes-unhide-all',
+      {},
+      cancellable
+    );
   }
 
   async deleteNote(id, cancellable = null) {

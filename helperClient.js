@@ -23,6 +23,7 @@ const COMMANDS = new Set([
   'folder-create',
   'lan-prepare',
   'lan-pair',
+  'lan-join-existing',
   'lan-accept-pending',
   'lan-status',
 ]);
@@ -231,6 +232,23 @@ export class HelperClient {
     return this._run(
       'lan-pair',
       {pairingCode},
+      cancellable
+    );
+  }
+
+  async joinExistingLan(
+    transnoteDeviceId,
+    syncthingDeviceId,
+    folderId,
+    cancellable = null
+  ) {
+    return this._run(
+      'lan-join-existing',
+      {
+        transnoteDeviceId,
+        syncthingDeviceId,
+        folderId,
+      },
       cancellable
     );
   }

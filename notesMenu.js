@@ -290,7 +290,7 @@ export class NotesMenuView {
     view.add_child(this._machineNameLabel);
 
     this._prepareLanButton = new St.Button({
-      label: 'Enable device sync',
+      label: 'Start new sync',
       can_focus: true,
       reactive: true,
       style_class: 'button transnote-lan-button',
@@ -307,7 +307,7 @@ export class NotesMenuView {
       style_class: 'transnote-pair-row',
     });
     this._pairingCodeEntry = new St.Entry({
-      hint_text: 'Select Enable device sync first',
+      hint_text: 'Select Start new sync first',
       can_focus: true,
       x_expand: true,
       style_class: 'transnote-entry transnote-pair-code',
@@ -325,7 +325,7 @@ export class NotesMenuView {
     view.add_child(codeRow);
 
     view.add_child(new St.Label({
-      text: 'Connect another computer',
+      text: 'Join existing sync',
       style_class: 'transnote-field-label',
     }));
     this._incomingPairingEntry = new St.Entry({
@@ -431,6 +431,47 @@ export class NotesMenuView {
     this._advancedSetup.add_child(this._allowListEntry);
     this._advancedSetup.add_child(new St.Label({
       text: 'Pairing updates this list automatically.',
+      style_class: 'transnote-hint',
+    }));
+
+    this._advancedSetup.add_child(new St.Label({
+      text: 'Join existing Omarchy or manual share',
+      style_class: 'transnote-field-label',
+    }));
+    this._manualPeerNameEntry = new St.Entry({
+      hint_text: 'Remote TransNote machine name',
+      can_focus: true,
+      style_class: 'transnote-entry',
+    });
+    this._advancedSetup.add_child(this._manualPeerNameEntry);
+
+    this._manualSyncthingIdEntry = new St.Entry({
+      hint_text: 'Syncthing device ID',
+      can_focus: true,
+      style_class: 'transnote-entry',
+    });
+    this._advancedSetup.add_child(this._manualSyncthingIdEntry);
+
+    this._manualFolderIdEntry = new St.Entry({
+      hint_text: 'Existing folder ID',
+      can_focus: true,
+      style_class: 'transnote-entry',
+    });
+    this._advancedSetup.add_child(this._manualFolderIdEntry);
+
+    this._manualJoinButton = new St.Button({
+      label: 'Join existing share',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-lan-button',
+    });
+    this._manualJoinButton.connect(
+      'clicked',
+      () => this._joinExistingLan()
+    );
+    this._advancedSetup.add_child(this._manualJoinButton);
+    this._advancedSetup.add_child(new St.Label({
+      text: 'Use this only when the existing TransNote share has no setup code.',
       style_class: 'transnote-hint',
     }));
 
@@ -1129,7 +1170,7 @@ export class NotesMenuView {
 
     const code = this._pairingCodeEntry.get_text().trim();
     if (code === '') {
-      this._setupStatus.text = 'Select Enable device sync first.';
+      this._setupStatus.text = 'Select Start new sync first.';
       return;
     }
 
@@ -1175,6 +1216,64 @@ export class NotesMenuView {
       this._pairingCodeEntry.set_text(String(prepared.pairingCode || ''));
       this._incomingPairingEntry.set_text('');
       this._setupStatus.text = `Connected to ${peerName}.`;
+      await this._refreshLanStatus();
+      await this.refresh();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._setupStatus.text = operatorLanErrorMessage(error);
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  async _joinExistingLan() {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+    try {
+      const config = this._saveDraftSettings();
+      if (config.syncDir === '')
+        throw new Error('Enter a shared folder first.');
+
+      const peerName = this._manualPeerNameEntry.get_text().trim();
+      const syncthingDeviceId =
+        this._manualSyncthingIdEntry.get_text().trim();
+      const folderId = this._manualFolderIdEntry.get_text().trim();
+
+      if (peerName === '')
+        throw new Error('Enter the remote TransNote machine name.');
+      if (syncthingDeviceId === '')
+        throw new Error('Enter the Syncthing device ID.');
+      if (folderId === '')
+        throw new Error('Enter the existing folder ID.');
+
+      this._setupStatus.text = 'Joining existing share…';
+      const result = await this._helper.joinExistingLan(
+        peerName,
+        syncthingDeviceId,
+        folderId,
+        this._cancellable
+      );
+      if (this._destroyed)
+        return;
+
+      const joinedPeer = String(
+        result.peer?.transnoteDeviceId || ''
+      ).trim();
+      if (joinedPeer === '')
+        throw new Error('Join returned no TransNote machine name.');
+
+      const current = this._settings.get_string('allow-list');
+      const updated = addQualifiedPeer(current, joinedPeer);
+      if (updated !== current)
+        this._settings.set_string('allow-list', updated);
+      this._allowListEntry.set_text(updated);
+
+      this._manualPeerNameEntry.set_text('');
+      this._manualSyncthingIdEntry.set_text('');
+      this._manualFolderIdEntry.set_text('');
+      this._setupStatus.text = `Connected to ${joinedPeer}.`;
       await this._refreshLanStatus();
       await this.refresh();
     } catch (error) {
@@ -1561,6 +1660,10 @@ export class NotesMenuView {
     this._incomingPairingEntry = null;
     this._pairLanButton = null;
     this._prepareLanButton = null;
+    this._manualPeerNameEntry = null;
+    this._manualSyncthingIdEntry = null;
+    this._manualFolderIdEntry = null;
+    this._manualJoinButton = null;
     this._pairedMachines = null;
     this._footer = null;
     this._clipboard = null;

@@ -14,9 +14,9 @@ class LanSetupUiTests(unittest.TestCase):
         for text in (
             "text: 'Device sync'",
             "text: 'This computer'",
-            "label: 'Enable device sync'",
+            "label: 'Start new sync'",
             "text: 'Your setup code'",
-            "text: 'Connect another computer'",
+            "text: 'Join existing sync'",
             "text: 'Connected computers'",
         ):
             self.assertIn(text, self.source)

@@ -964,6 +964,30 @@ async function lanPair(dataDir, config) {
   };
 }
 
+async function lanJoinExisting(dataDir, config) {
+  requireLanConfig(config);
+  await mkdir(config.syncDir, {recursive: true, mode: 0o700});
+  const input = await readStdinJson();
+
+  const result = await makeSyncthingControl().pair({
+    localTransnoteDeviceId: config.deviceId,
+    syncDir: config.syncDir,
+    remote: {
+      version: 1,
+      transnoteDeviceId: input.transnoteDeviceId,
+      syncthingDeviceId: input.syncthingDeviceId,
+      folderId: input.folderId,
+    },
+  });
+
+  await saveLanPeer(dataDir, result.peer);
+
+  return {
+    ok: true,
+    peer: result.peer,
+  };
+}
+
 async function lanAcceptPending(config) {
   requireLanConfig(config);
   await mkdir(config.syncDir, {recursive: true, mode: 0o700});
@@ -1045,6 +1069,8 @@ try {
     result = await lanPrepare(config);
   else if (command === 'lan-pair')
     result = await lanPair(dataDir, config);
+  else if (command === 'lan-join-existing')
+    result = await lanJoinExisting(dataDir, config);
   else if (command === 'lan-accept-pending')
     result = await lanAcceptPending(config);
   else if (command === 'lan-status')

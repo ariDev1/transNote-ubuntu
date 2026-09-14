@@ -28,6 +28,7 @@ The Ubuntu port keeps the existing TransNote note model and compatible folder-sy
 - Red unread indicator for new peer notes
 - Automatic peer polling
 - Compatible folder synchronization
+- Deletion and unshare tombstones prevent stale shared notes from reappearing
 - Built-in Syncthing-assisted device pairing
 - Setup-code pairing between computers
 - Automatic trusted-peer updates after pairing
@@ -147,6 +148,8 @@ Shared notes are stored as JSON snapshots in the configured synchronization fold
 The Ubuntu port does not create a second TransNote folder-sync protocol.
 
 It preserves the compatible note and snapshot architecture so that Ubuntu and Omarchy systems can exchange shared notes.
+
+The Ubuntu port supports snapshot version 2 deletion tombstones and continues to accept version 1 snapshots.
 
 Original Omarchy project:
 

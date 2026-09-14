@@ -25,6 +25,13 @@ import {
 import {loadState, resolveDataDir, saveState} from './storage.mjs';
 import {decodePairingCode, loadLanPeers, saveLanPeer} from './lan-pairing.mjs';
 import {createExecFileRunner, createSyncthingControl} from './syncthing-control.mjs';
+import {
+  addTombstone,
+  isDeleted,
+  mergeDeleted,
+  reconcileDeleted,
+  removeTombstone,
+} from './tombstones.mjs';
 
 const require = createRequire(import.meta.url);
 const Store = require('../core/Store.js');
@@ -126,6 +133,7 @@ async function notesList(dataDir, config) {
   let peers = {
     notes: [],
     pairs: [],
+    deletedIds: {},
     diagnostics: emptyDiagnostics(config.configured),
   };
 
@@ -137,7 +145,20 @@ async function notesList(dataDir, config) {
     });
   }
 
-  const peerNotes = peers.notes.filter(note => !mine.has(note.id));
+  const livePeerNotes = peers.notes.filter(note => !mine.has(note.id));
+  const deletedIds = reconcileDeleted(
+    mergeDeleted(state.deletedIds, peers.deletedIds),
+    livePeerNotes
+  );
+  const peerNotes = livePeerNotes.filter(
+    note => !isDeleted(deletedIds, note.id)
+  );
+  const peerPairs = peers.pairs.filter(
+    entry => entry && !isDeleted(deletedIds, entry.noteId)
+  );
+  let stateChanged =
+    JSON.stringify(deletedIds) !== JSON.stringify(state.deletedIds);
+  state.deletedIds = deletedIds;
 
   if (config.configured) {
     const prunedOutbox = Store.pruneOutbox(
@@ -151,13 +172,16 @@ async function notesList(dataDir, config) {
       JSON.stringify(Store.sanitizeOutbox(state.outbox))
     ) {
       state.outbox = prunedOutbox;
-      await saveState(dataDir, state);
+      stateChanged = true;
     }
   }
 
+  if (stateChanged)
+    await saveState(dataDir, state);
+
   const foreignComments = Store.mergeForeignComments(
     {},
-    peers.pairs.concat(state.outbox),
+    peerPairs.concat(state.outbox),
     config.allowList,
     config.deviceId
   );
@@ -284,11 +308,23 @@ async function commentAdd(dataDir, config) {
       allowList: config.allowList,
     });
 
+    const effectiveDeleted = reconcileDeleted(
+      mergeDeleted(state.deletedIds, peers.deletedIds),
+      peers.notes
+    );
+    const deletedChanged =
+      JSON.stringify(effectiveDeleted) !== JSON.stringify(state.deletedIds);
+    state.deletedIds = effectiveDeleted;
+
     const peerNote = peers.notes.find(
-      note => note && note.id === noteId
+      note => note &&
+        note.id === noteId &&
+        !isDeleted(effectiveDeleted, note.id)
     );
 
     if (!peerNote) {
+      if (deletedChanged)
+        await saveState(dataDir, state);
       throw helperError(
         'NOTE_NOT_FOUND',
         'qualified peer note was not found'
@@ -315,7 +351,7 @@ async function commentAdd(dataDir, config) {
     );
   }
 
-  state.version = 1;
+  state.version = 2;
   state.deviceId = config.deviceId;
   state.notes = Store.sortNotes(state.notes);
 
@@ -327,6 +363,7 @@ async function commentAdd(dataDir, config) {
       deviceId: config.deviceId,
       notes: state.notes,
       outbox: state.outbox,
+      deletedIds: state.deletedIds,
     });
   }
 
@@ -342,7 +379,7 @@ async function noteCreate(dataDir, config) {
   const state = await loadState(dataDir);
   const note = Store.createNote(input.title, input.body, config.deviceId);
 
-  state.version = 1;
+  state.version = 2;
   state.deviceId = config.deviceId;
   state.notes.push(note);
   state.notes = Store.sortNotes(state.notes);
@@ -444,7 +481,7 @@ async function addAttachmentFromSource(
 
     note.updatedAt = Store.nowIso();
 
-    state.version = 1;
+    state.version = 2;
     state.deviceId = config.deviceId;
     state.notes = Store.sortNotes(state.notes);
 
@@ -456,6 +493,7 @@ async function addAttachmentFromSource(
         deviceId: config.deviceId,
         notes: state.notes,
         outbox: state.outbox,
+        deletedIds: state.deletedIds,
       });
     }
   } catch (error) {
@@ -609,8 +647,15 @@ async function resolveAttachmentActionTarget(
     allowList: config.allowList,
   });
 
+  const effectiveDeleted = reconcileDeleted(
+    mergeDeleted(state.deletedIds, peers.deletedIds),
+    peers.notes
+  );
+
   const peerNote = peers.notes.find(
-    note => note && note.id === cleanNoteId
+    note => note &&
+      note.id === cleanNoteId &&
+      !isDeleted(effectiveDeleted, note.id)
   );
 
   if (!peerNote) {
@@ -773,7 +818,7 @@ async function noteColorCycle(dataDir, config) {
     );
   }
 
-  state.version = 1;
+  state.version = 2;
   state.deviceId = config.deviceId;
   state.notes = Store.sortNotes(state.notes);
 
@@ -785,6 +830,7 @@ async function noteColorCycle(dataDir, config) {
       deviceId: config.deviceId,
       notes: state.notes,
       outbox: state.outbox,
+      deletedIds: state.deletedIds,
     });
   }
 
@@ -808,11 +854,16 @@ async function noteShare(dataDir, config) {
   if (!note)
     throw helperError('NOTE_NOT_FOUND', 'local note was not found');
 
-  if (!Store.setShared(note, input.shared === true, config.deviceId))
+  const shared = input.shared === true;
+  if (!Store.setShared(note, shared, config.deviceId))
     throw helperError('NOT_OWNER', 'only the note author can change sharing');
 
+  state.deletedIds = shared
+    ? removeTombstone(state.deletedIds, id)
+    : addTombstone(state.deletedIds, id);
+
   if (
-    input.shared === true &&
+    shared &&
     config.configured
   ) {
     await mirrorSharedAttachments({
@@ -822,13 +873,13 @@ async function noteShare(dataDir, config) {
     });
   }
 
-  state.version = 1;
+  state.version = 2;
   state.deviceId = config.deviceId;
   state.notes = Store.sortNotes(state.notes);
   await saveState(dataDir, state);
 
   if (
-    input.shared !== true &&
+    !shared &&
     config.configured
   ) {
     await removeAttachmentNoteDirectory({
@@ -843,6 +894,7 @@ async function noteShare(dataDir, config) {
       deviceId: config.deviceId,
       notes: state.notes,
       outbox: state.outbox,
+      deletedIds: state.deletedIds,
     });
   }
 
@@ -866,7 +918,11 @@ async function noteDelete(dataDir, config) {
     throw helperError('NOTE_NOT_FOUND', 'local note was not found');
 
   state.notes.splice(index, 1);
-  state.version = 1;
+  state.deletedIds = addTombstone(state.deletedIds, id);
+  state.outbox = Store.sanitizeOutbox(state.outbox).filter(
+    entry => entry && entry.noteId !== id
+  );
+  state.version = 2;
   state.deviceId = config.deviceId;
   state.notes = Store.sortNotes(state.notes);
   await saveState(dataDir, state);
@@ -887,6 +943,7 @@ async function noteDelete(dataDir, config) {
       deviceId: config.deviceId,
       notes: state.notes,
       outbox: state.outbox,
+      deletedIds: state.deletedIds,
     });
   }
 
@@ -907,6 +964,7 @@ async function syncNow(dataDir, config) {
     deviceId: config.deviceId,
     notes: state.notes,
     outbox: state.outbox,
+    deletedIds: state.deletedIds,
   });
 
   return notesList(dataDir, config);

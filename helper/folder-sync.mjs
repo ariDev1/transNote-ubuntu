@@ -10,6 +10,12 @@ import {homedir} from 'node:os';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
 
+import {
+  filterDeletedNotes,
+  mergeDeleted,
+  sanitizeDeleted,
+} from './tombstones.mjs';
+
 const require = createRequire(import.meta.url);
 const Store = require('../core/Store.js');
 
@@ -63,6 +69,7 @@ export function buildSnapshot({
   deviceId,
   notes,
   outbox,
+  deletedIds,
   updatedAt = Store.nowIso(),
 }) {
   const cleanDeviceId = validateDeviceId(deviceId);
@@ -74,11 +81,12 @@ export function buildSnapshot({
     .filter(value => value && value.shared === true);
 
   return {
-    version: 1,
+    version: 2,
     deviceId: cleanDeviceId,
     updatedAt,
     notes: shared,
     noteComments: Store.sanitizeOutbox(outbox),
+    deletedIds: sanitizeDeleted(deletedIds),
   };
 }
 
@@ -87,6 +95,7 @@ export async function writeSnapshot({
   deviceId,
   notes,
   outbox,
+  deletedIds,
   updatedAt,
 }) {
   const config = normalizeSyncConfig({deviceId, syncDir, allowList: []});
@@ -97,6 +106,7 @@ export async function writeSnapshot({
     deviceId: config.deviceId,
     notes,
     outbox,
+    deletedIds,
     updatedAt,
   });
 
@@ -134,14 +144,14 @@ export async function readPeerSnapshots({
   };
 
   if (!config.configured)
-    return {notes: [], pairs: [], diagnostics};
+    return {notes: [], pairs: [], deletedIds: {}, diagnostics};
 
   let entries;
   try {
     entries = await readdir(config.syncDir, {withFileTypes: true});
   } catch (error) {
     if (error.code === 'ENOENT')
-      return {notes: [], pairs: [], diagnostics};
+      return {notes: [], pairs: [], deletedIds: {}, diagnostics};
     throw error;
   }
 
@@ -158,12 +168,18 @@ export async function readPeerSnapshots({
 
   const allNotes = [];
   const allPairs = [];
+  let deletedIds = {};
 
   for (const name of files) {
     try {
       const raw = await readFile(join(config.syncDir, name), 'utf8');
       const parsed = JSON.parse(raw);
       diagnostics.fetched++;
+
+      deletedIds = mergeDeleted(
+        deletedIds,
+        parsed?.deletedIds ?? parsed?.deleted
+      );
 
       const rawNotes = parsed && Array.isArray(parsed.notes)
         ? parsed.notes
@@ -188,11 +204,19 @@ export async function readPeerSnapshots({
     }
   }
 
-  diagnostics.snapNotes = allNotes.length;
+  const visibleNotes = filterDeletedNotes(allNotes, deletedIds);
+  const visiblePairs = allPairs.filter(
+    entry => entry && !Object.prototype.hasOwnProperty.call(
+      deletedIds,
+      Store.normalizeText(entry.noteId)
+    )
+  );
+
+  diagnostics.snapNotes = visibleNotes.length;
 
   const notes = Store.mergeNotes(
     [],
-    allNotes,
+    visibleNotes,
     config.allowList,
     config.deviceId
   );
@@ -201,7 +225,8 @@ export async function readPeerSnapshots({
 
   return {
     notes: Store.sortNotes(notes),
-    pairs: allPairs,
+    pairs: visiblePairs,
+    deletedIds,
     diagnostics,
   };
 }

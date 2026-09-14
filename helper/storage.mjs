@@ -11,6 +11,8 @@ import {homedir} from 'node:os';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
 
+import {sanitizeDeleted} from './tombstones.mjs';
+
 const require = createRequire(import.meta.url);
 const Store = require('../core/Store.js');
 
@@ -21,10 +23,11 @@ export function resolveDataDir(env = process.env) {
 
 function emptyState() {
   return {
-    version: 1,
+    version: 2,
     deviceId: '',
     notes: [],
     outbox: [],
+    deletedIds: {},
   };
 }
 
@@ -40,10 +43,11 @@ function sanitizeState(parsed) {
     .filter(Boolean);
 
   return {
-    version: 1,
+    version: 2,
     deviceId: Store.normalizeText(parsed?.deviceId),
     notes,
     outbox: Store.sanitizeOutbox(parsed?.outbox),
+    deletedIds: sanitizeDeleted(parsed?.deletedIds ?? parsed?.deleted),
   };
 }
 

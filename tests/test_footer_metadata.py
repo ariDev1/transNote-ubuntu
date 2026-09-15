@@ -10,8 +10,8 @@ class FooterMetadataTests(unittest.TestCase):
     def test_metadata_separates_gnome_and_product_versions(self):
         metadata = json.loads((ROOT / "metadata.json").read_text())
 
-        self.assertEqual(metadata["version"], 5)
-        self.assertEqual(metadata["version-name"], "0.5.0")
+        self.assertEqual(metadata["version"], 6)
+        self.assertEqual(metadata["version-name"], "0.5.1")
 
     def test_extension_passes_metadata_to_indicator(self):
         source = (ROOT / "extension.js").read_text()

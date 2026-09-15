@@ -10,11 +10,11 @@ The Ubuntu port keeps the existing TransNote note model and compatible folder-sy
 
 ## Current release
 
-- TransNote 0.5.0
+- TransNote 0.5.1
 - GNOME Shell 46 and 50
 - Extension UUID: `transnote@aridev1`
-- Extension version: `5`
-- Footer build information: `0.5.0 · <revision> · GitHub`
+- Extension version: `6`
+- Footer build information: `0.5.1 · <revision> · GitHub`
 - Ubuntu ↔ Ubuntu device sync supported
 - Ubuntu ↔ Omarchy folder sync supported
 

@@ -405,6 +405,12 @@ export class NotesMenuView {
     });
     view.add_child(this._setupStatus);
 
+    this._syncStatus = new St.Label({
+      text: 'Sync service: checking…',
+      style_class: 'transnote-status',
+    });
+    view.add_child(this._syncStatus);
+
     this._advancedButton = new St.Button({
       label: 'Advanced',
       can_focus: true,
@@ -1604,6 +1610,13 @@ export class NotesMenuView {
       this._renderPendingDevices(pendingDevices);
       this._renderPendingOffers(pendingOffers);
 
+      if (result.installed !== true)
+        this._syncStatus.text = 'Syncthing is not installed.';
+      else if (result.running !== true)
+        this._syncStatus.text = 'Syncthing is not running.';
+      else
+        this._syncStatus.text = 'Sync service: ready';
+
       let syncthingText;
       if (result.installed !== true)
         syncthingText = 'Syncthing: not installed';
@@ -1649,7 +1662,9 @@ export class NotesMenuView {
       if (!this._destroyed && !this._cancellable.is_cancelled()) {
         this._renderPendingDevices([]);
         this._renderPendingOffers([]);
-        this._lanRuntimeStatus.text = operatorLanErrorMessage(error);
+        const message = operatorLanErrorMessage(error);
+        this._lanRuntimeStatus.text = message;
+        this._syncStatus.text = message;
       }
     } finally {
       this._lanStatusBusy = false;
@@ -1882,6 +1897,7 @@ export class NotesMenuView {
     this._advancedButton = null;
     this._advancedSetup = null;
     this._setupStatus = null;
+    this._syncStatus = null;
     this._diagnostics = null;
     this._lanRuntimeStatus = null;
     this._pendingDevicesBox = null;

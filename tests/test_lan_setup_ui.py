@@ -81,6 +81,18 @@ class LanSetupUiTests(unittest.TestCase):
         self.assertIn("'lan-accept-pending-device'", self.client)
         self.assertIn("async acceptPendingDeviceLan(", self.client)
 
+    def test_sync_service_state_is_visible_without_advanced(self):
+        for text in (
+            "this._syncStatus = new St.Label({",
+            "text: 'Sync service: checking…'",
+            "this._syncStatus.text = 'Syncthing is not installed.';",
+            "this._syncStatus.text = 'Syncthing is not running.';",
+            "this._syncStatus.text = 'Sync service: ready';",
+            "const message = operatorLanErrorMessage(error);",
+            "this._syncStatus.text = message;",
+        ):
+            self.assertIn(text, self.source)
+
     def test_setup_styles_keep_advanced_controls_structured(self):
         for selector in (
             ".transnote-machine-name",

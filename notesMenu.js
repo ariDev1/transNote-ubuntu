@@ -1615,6 +1615,13 @@ export class NotesMenuView {
       else if (result.running !== true)
         this._syncStatus.text = 'Syncthing is not running.';
       else if (
+        result.folder?.configured !== true &&
+        pendingOffers.length > 0
+      )
+        this._syncStatus.text = 'A TransNote folder is waiting for acceptance.';
+      else if (result.folder?.configured !== true)
+        this._syncStatus.text = 'The TransNote sync folder is not prepared yet.';
+      else if (
         result.folder?.configured === true &&
         result.folder.paused === true
       )

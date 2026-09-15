@@ -93,6 +93,34 @@ class LanSetupUiTests(unittest.TestCase):
         ):
             self.assertIn(text, self.source)
 
+    def test_pending_transnote_folder_offer_is_visible_before_unprepared_state(self):
+        source = " ".join(self.source.split())
+        pending_check = "result.folder?.configured !== true && pendingOffers.length > 0"
+        pending_message = "this._syncStatus.text = 'A TransNote folder is waiting for acceptance.';"
+        unprepared_message = "this._syncStatus.text = 'The TransNote sync folder is not prepared yet.';"
+
+        self.assertIn(pending_check, source)
+        self.assertIn(pending_message, source)
+        self.assertLess(
+            source.index(pending_message),
+            source.index(unprepared_message),
+        )
+
+    def test_unprepared_transnote_folder_is_visible_before_paused_state(self):
+        source = " ".join(self.source.split())
+        unprepared_branch = (
+            "else if (result.folder?.configured !== true) "
+            "this._syncStatus.text = 'The TransNote sync folder is not prepared yet.';"
+        )
+        paused_check = "result.folder?.configured === true && result.folder.paused === true"
+
+        self.assertIn(unprepared_branch, source)
+        self.assertIn(paused_check, source)
+        self.assertLess(
+            source.index(unprepared_branch),
+            source.index(paused_check),
+        )
+
     def test_paused_transnote_folder_is_reported_before_peer_disconnect(self):
         source = " ".join(self.source.split())
         paused_check = "result.folder?.configured === true && result.folder.paused === true"

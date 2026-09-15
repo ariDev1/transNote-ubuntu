@@ -8,13 +8,14 @@ The Ubuntu port keeps the existing TransNote note model and compatible folder-sy
 
 ![TransNote Ubuntu preview](preview.png)
 
-## Current baseline
+## Current release
 
-- TransNote 0.3.0
-- GNOME Shell 46
+- TransNote 0.5.0
+- GNOME Shell 46 and 50
 - Extension UUID: `transnote@aridev1`
-- Extension version: `4`
-- Footer build information: `0.3.0 · <revision> · GitHub`
+- Extension version: `5`
+- Footer build information: `0.5.0 · <revision> · GitHub`
+- Ubuntu ↔ Ubuntu device sync supported
 - Ubuntu ↔ Omarchy folder sync supported
 
 ## Features
@@ -32,7 +33,10 @@ The Ubuntu port keeps the existing TransNote note model and compatible folder-sy
 - Built-in Syncthing-assisted device pairing
 - Setup-code pairing between computers
 - Automatic trusted-peer updates after pairing
+- Acceptance of pending computer connections
 - Acceptance of pending TransNote folders
+- Symmetric setup-code pairing: either computer can initiate pairing
+- Established TransNote shares remain authoritative during onboarding
 - Automatic first-run machine name
 - Automatic default sync folder on first run
 - Advanced controls for machine name, shared folder, trusted peers, and diagnostics
@@ -41,7 +45,7 @@ Opening TransNote clears the unread indicator. Existing notes do not create a fa
 
 ## Requirements
 
-- Ubuntu with GNOME Shell 46
+- Ubuntu with GNOME Shell 46 or 50
 - Node.js
 - Git
 - Syncthing for the built-in device-sync setup, or another tool that synchronizes the shared folder
@@ -95,14 +99,17 @@ On a new installation, TransNote creates a machine name and the default sync fol
 
 For normal setup:
 
-1. Select **Enable device sync**.
+1. Select **Start new sync** on either computer.
 2. Copy **Your setup code**.
 3. Open TransNote on the other computer.
-4. Paste the code under **Connect another computer**.
+4. Paste the code under **Join existing sync**.
 5. Select **Connect**.
-6. Accept a pending TransNote folder in TransNote if one appears.
+6. If the code came from a new computer and the receiving computer already has an established TransNote share, return to the new computer and accept the **Pending computer connection**.
+7. Accept the **Pending TransNote folder** if it appears.
 
-Pairing updates the trusted-peer list automatically.
+The established TransNote share remains authoritative. A fresh provisional TransNote folder can be replaced when the computer joins that established share.
+
+Pairing updates the trusted-peer list on the computer that imports the setup code.
 
 Normal setup does not require manual Syncthing device IDs, folder IDs, the Syncthing web interface, or terminal commands.
 

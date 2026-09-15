@@ -39,12 +39,12 @@ REQUIRED_RUNTIME_FILES = (
 )
 
 
-class Version4BaselineTests(unittest.TestCase):
-    def test_metadata_identifies_field_confirmed_version_4(self):
+class Version5BaselineTests(unittest.TestCase):
+    def test_metadata_identifies_release_version_5(self):
         metadata = json.loads((ROOT / "metadata.json").read_text())
 
         self.assertEqual(metadata["uuid"], "transnote@aridev1")
-        self.assertEqual(metadata["version"], 4)
+        self.assertEqual(metadata["version"], 5)
         self.assertEqual(metadata["shell-version"], ["46", "50"])
         self.assertEqual(
             metadata["url"],

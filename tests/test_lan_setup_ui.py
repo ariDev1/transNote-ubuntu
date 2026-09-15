@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class LanSetupUiTests(unittest.TestCase):
     def setUp(self):
         self.source = (ROOT / "notesMenu.js").read_text()
+        self.client = (ROOT / "helperClient.js").read_text()
         self.styles = (ROOT / "stylesheet.css").read_text()
 
     def test_normal_setup_focuses_on_device_pairing(self):
@@ -67,6 +68,18 @@ class LanSetupUiTests(unittest.TestCase):
             "this._settings.get_string('device-id');",
             self.source,
         )
+
+    def test_pending_device_acceptance_is_visible_in_setup(self):
+        for text in (
+            "text: 'Pending computer connections'",
+            "this._renderPendingDevices([]);",
+            "this._helper.acceptPendingDeviceLan(",
+            "const pendingDevices = Array.isArray(result.pendingDevices)",
+        ):
+            self.assertIn(text, self.source)
+
+        self.assertIn("'lan-accept-pending-device'", self.client)
+        self.assertIn("async acceptPendingDeviceLan(", self.client)
 
     def test_setup_styles_keep_advanced_controls_structured(self):
         for selector in (

@@ -1128,6 +1128,20 @@ async function lanJoinExisting(dataDir, config) {
   };
 }
 
+async function lanAcceptPendingDevice(config) {
+  requireLanConfig(config);
+  const input = await readStdinJson();
+
+  const result = await makeSyncthingControl().acceptPendingDevice({
+    syncthingDeviceId: input.syncthingDeviceId,
+  });
+
+  return {
+    ok: true,
+    ...result,
+  };
+}
+
 async function lanAcceptPending(config) {
   requireLanConfig(config);
   await mkdir(config.syncDir, {recursive: true, mode: 0o700});
@@ -1215,6 +1229,8 @@ try {
     result = await lanPair(dataDir, config);
   else if (command === 'lan-join-existing')
     result = await lanJoinExisting(dataDir, config);
+  else if (command === 'lan-accept-pending-device')
+    result = await lanAcceptPendingDevice(config);
   else if (command === 'lan-accept-pending')
     result = await lanAcceptPending(config);
   else if (command === 'lan-status')

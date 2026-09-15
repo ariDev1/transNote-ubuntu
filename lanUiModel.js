@@ -15,6 +15,7 @@ const ERROR_MESSAGES = new Map([
   ['PENDING_TRANSNOTE_OFFER', 'A TransNote folder offer is waiting. Accept it first.'],
   ['PENDING_OFFER_NOT_FOUND', 'That TransNote folder offer is no longer available.'],
   ['PENDING_OFFER_NOT_TRANSNOTE', 'The selected folder offer is not a TransNote folder.'],
+  ['PENDING_DEVICE_NOT_FOUND', 'That pending computer connection is no longer available.'],
   ['PENDING_DEVICE_NOT_CONFIGURED', 'The offering Syncthing device is not configured locally.'],
 ]);
 

@@ -20,6 +20,10 @@ REMOTE_SYNCTHING_ID = (
     "XAKQHZH-LBCD2KA-WFGNFGQ-XUV7HQU-"
     "UV23PME-BFYYBCR-S5MJXXR-RDTQTQK"
 )
+EXISTING_SYNCTHING_ID = (
+    "P56IOI7-MZJNU2Y-IQGDREY-DM2MGTI-"
+    "MGL3BXN-PQ6W5BM-TBBZ4TJ-XZWICQ2"
+)
 REMOTE_FOLDER_ID = "reye3-kwu5q"
 
 
@@ -48,6 +52,8 @@ def write_fake_syncthing(path):
                 print(json.dumps({"myID": os.environ["FAKE_LOCAL_ID"]}))
             elif args == ["cli", "config", "dump-json"]:
                 print(os.environ["FAKE_CONFIG_JSON"])
+            elif args == ["cli", "show", "pending", "devices"]:
+                print(os.environ.get("FAKE_PENDING_DEVICES_JSON", "{}"))
             elif args == ["cli", "show", "pending", "folders"]:
                 print(os.environ.get("FAKE_PENDING_JSON", "{}"))
             elif args == ["cli", "show", "connections"]:
@@ -79,6 +85,8 @@ def run_helper(
     log_path,
     config,
     input_value=None,
+    pending_folders=None,
+    pending_devices=None,
 ):
     env = os.environ.copy()
     env["TRANSNOTE_DATA_DIR"] = str(data_dir)
@@ -86,7 +94,8 @@ def run_helper(
     env["FAKE_SYNCTHING_LOG"] = str(log_path)
     env["FAKE_LOCAL_ID"] = LOCAL_SYNCTHING_ID
     env["FAKE_CONFIG_JSON"] = json.dumps(config)
-    env["FAKE_PENDING_JSON"] = "{}"
+    env["FAKE_PENDING_JSON"] = json.dumps(pending_folders or {})
+    env["FAKE_PENDING_DEVICES_JSON"] = json.dumps(pending_devices or {})
 
     return subprocess.run(
         [
@@ -241,23 +250,29 @@ class LanJoinExistingTests(unittest.TestCase):
             commands.index(add_command),
         )
 
-    def test_join_existing_keeps_shared_transnote_folder_fail_closed(self):
-        existing_id = "tn-fedcba9876543210"
+    def test_join_existing_keeps_established_transnote_folder_as_authority(self):
+        established_id = "tn-fedcba9876543210"
+        remote = self.join_input()
+        remote["folderId"] = "tn-0123456789abcdef"
+
         config = {
             "folders": [
                 {
-                    "id": existing_id,
+                    "id": established_id,
                     "label": "transnote-lan",
                     "path": str(self.sync_dir.resolve()),
                     "type": "sendreceive",
                     "paused": False,
                     "devices": [
                         {"deviceID": LOCAL_SYNCTHING_ID},
-                        {"deviceID": REMOTE_SYNCTHING_ID},
+                        {"deviceID": EXISTING_SYNCTHING_ID},
                     ],
                 }
             ],
-            "devices": [],
+            "devices": [
+                {"deviceID": LOCAL_SYNCTHING_ID},
+                {"deviceID": EXISTING_SYNCTHING_ID},
+            ],
         }
 
         result = run_helper(
@@ -267,24 +282,267 @@ class LanJoinExistingTests(unittest.TestCase):
             fake_syncthing=self.fake_syncthing,
             log_path=self.log_path,
             config=config,
-            input_value=self.join_input(),
+            input_value=remote,
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        value = json.loads(result.stderr)
-        self.assertEqual(value["error"]["code"], "FOLDER_ID_CONFLICT")
-        self.assertEqual(self.local_snapshot.read_bytes(), self.snapshot_bytes)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        value = json.loads(result.stdout)
+        self.assertEqual(value["peer"]["folderId"], established_id)
+        self.assertEqual(
+            value["peer"]["syncthingDeviceId"],
+            REMOTE_SYNCTHING_ID,
+        )
+        self.assertEqual(
+            self.local_snapshot.read_bytes(),
+            self.snapshot_bytes,
+        )
 
         commands = read_commands(self.log_path)
+
+        self.assertIn(
+            [
+                "cli",
+                "config",
+                "devices",
+                "add",
+                "--device-id",
+                REMOTE_SYNCTHING_ID,
+            ],
+            commands,
+        )
+
+        self.assertIn(
+            [
+                "cli",
+                "config",
+                "folders",
+                established_id,
+                "devices",
+                "add",
+                "--device-id",
+                REMOTE_SYNCTHING_ID,
+            ],
+            commands,
+        )
+
         self.assertNotIn(
             [
                 "cli",
                 "config",
                 "folders",
-                existing_id,
+                established_id,
                 "delete",
             ],
             commands,
+        )
+
+        folder_adds = [
+            command
+            for command in commands
+            if command[:4] == [
+                "cli",
+                "config",
+                "folders",
+                "add",
+            ]
+        ]
+        self.assertEqual(folder_adds, [])
+
+    def test_accept_pending_established_folder_replaces_provisional_folder(self):
+        provisional_id = "tn-0123456789abcdef"
+
+        config = {
+            "folders": [
+                {
+                    "id": provisional_id,
+                    "label": "transnote-lan",
+                    "path": str(self.sync_dir.resolve()),
+                    "type": "sendreceive",
+                    "paused": False,
+                    "devices": [
+                        {"deviceID": LOCAL_SYNCTHING_ID},
+                    ],
+                }
+            ],
+            "devices": [
+                {
+                    "deviceID": LOCAL_SYNCTHING_ID,
+                    "name": "local",
+                },
+                {
+                    "deviceID": REMOTE_SYNCTHING_ID,
+                    "name": "labor",
+                },
+            ],
+        }
+
+        pending = {
+            REMOTE_FOLDER_ID: {
+                "offeredBy": {
+                    REMOTE_SYNCTHING_ID: {
+                        "label": "transnote-lan",
+                    }
+                }
+            }
+        }
+
+        result = run_helper(
+            "lan-accept-pending",
+            data_dir=self.data_dir,
+            sync_dir=self.sync_dir,
+            fake_syncthing=self.fake_syncthing,
+            log_path=self.log_path,
+            config=config,
+            input_value={
+                "folderId": REMOTE_FOLDER_ID,
+                "syncthingDeviceId": REMOTE_SYNCTHING_ID,
+            },
+            pending_folders=pending,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        value = json.loads(result.stdout)
+        self.assertEqual(value["folderId"], REMOTE_FOLDER_ID)
+        self.assertEqual(
+            self.local_snapshot.read_bytes(),
+            self.snapshot_bytes,
+        )
+
+        commands = read_commands(self.log_path)
+
+        delete_command = [
+            "cli",
+            "config",
+            "folders",
+            provisional_id,
+            "delete",
+        ]
+
+        add_command = [
+            "cli",
+            "config",
+            "folders",
+            "add",
+            "--id",
+            REMOTE_FOLDER_ID,
+            "--label",
+            "transnote-lan",
+            "--path",
+            str(self.sync_dir.resolve()),
+        ]
+
+        self.assertIn(delete_command, commands)
+        self.assertIn(add_command, commands)
+
+        self.assertIn(
+            [
+                "cli",
+                "config",
+                "folders",
+                REMOTE_FOLDER_ID,
+                "devices",
+                "add",
+                "--device-id",
+                REMOTE_SYNCTHING_ID,
+            ],
+            commands,
+        )
+
+        self.assertLess(
+            commands.index(delete_command),
+            commands.index(add_command),
+        )
+
+    def test_pending_device_request_can_be_accepted(self):
+        pending = {
+            REMOTE_SYNCTHING_ID: {
+                "name": "labor",
+                "address": "192.0.2.2:22000",
+                "time": "2026-09-15T09:00:00Z",
+            }
+        }
+
+        config = {
+            "folders": [],
+            "devices": [
+                {"deviceID": LOCAL_SYNCTHING_ID},
+            ],
+        }
+
+        result = run_helper(
+            "lan-accept-pending-device",
+            data_dir=self.data_dir,
+            sync_dir=self.sync_dir,
+            fake_syncthing=self.fake_syncthing,
+            log_path=self.log_path,
+            config=config,
+            input_value={
+                "syncthingDeviceId": REMOTE_SYNCTHING_ID,
+            },
+            pending_devices=pending,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        value = json.loads(result.stdout)
+        self.assertEqual(
+            value["syncthingDeviceId"],
+            REMOTE_SYNCTHING_ID,
+        )
+        self.assertEqual(value["deviceName"], "labor")
+
+        self.assertIn(
+            [
+                "cli",
+                "config",
+                "devices",
+                "add",
+                "--device-id",
+                REMOTE_SYNCTHING_ID,
+            ],
+            read_commands(self.log_path),
+        )
+
+    def test_lan_status_reports_pending_devices(self):
+        pending = {
+            REMOTE_SYNCTHING_ID: {
+                "name": "labor",
+                "address": "192.0.2.2:22000",
+                "time": "2026-09-15T09:00:00Z",
+            }
+        }
+
+        config = {
+            "folders": [],
+            "devices": [
+                {"deviceID": LOCAL_SYNCTHING_ID},
+            ],
+        }
+
+        result = run_helper(
+            "lan-status",
+            data_dir=self.data_dir,
+            sync_dir=self.sync_dir,
+            fake_syncthing=self.fake_syncthing,
+            log_path=self.log_path,
+            config=config,
+            pending_devices=pending,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        value = json.loads(result.stdout)
+        self.assertEqual(
+            value["pendingDevices"],
+            [
+                {
+                    "syncthingDeviceId": REMOTE_SYNCTHING_ID,
+                    "deviceName": "labor",
+                    "address": "192.0.2.2:22000",
+                }
+            ],
         )
 
     def test_join_existing_fails_closed_on_path_folder_id_conflict(self):

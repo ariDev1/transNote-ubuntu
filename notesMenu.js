@@ -120,6 +120,8 @@ export class NotesMenuView {
           return GLib.SOURCE_REMOVE;
 
         this.refresh();
+        if (this._setupScrollView?.visible)
+          this._refreshLanStatus();
         return GLib.SOURCE_CONTINUE;
       }
     );
@@ -363,6 +365,17 @@ export class NotesMenuView {
     });
     this._pairLanButton.connect('clicked', () => this._pairLan());
     view.add_child(this._pairLanButton);
+
+    view.add_child(new St.Label({
+      text: 'Pending computer connections',
+      style_class: 'transnote-field-label',
+    }));
+    this._pendingDevicesBox = new St.BoxLayout({
+      vertical: true,
+      style_class: 'transnote-pending-list',
+    });
+    view.add_child(this._pendingDevicesBox);
+    this._renderPendingDevices([]);
 
     view.add_child(new St.Label({
       text: 'Pending TransNote folders',
@@ -1393,6 +1406,103 @@ export class NotesMenuView {
     }
   }
 
+  _renderPendingDevices(devices) {
+    if (this._destroyed || !this._pendingDevicesBox)
+      return;
+
+    for (const child of this._pendingDevicesBox.get_children())
+      child.destroy();
+
+    const pending = Array.isArray(devices) ? devices : [];
+
+    if (pending.length === 0) {
+      this._pendingDevicesBox.add_child(new St.Label({
+        text: 'No pending computer connections.',
+        style_class: 'transnote-hint',
+      }));
+      return;
+    }
+
+    for (const device of pending) {
+      const syncthingDeviceId = String(
+        device?.syncthingDeviceId || ''
+      ).trim();
+
+      if (syncthingDeviceId === '')
+        continue;
+
+      const row = new St.BoxLayout({
+        style_class: 'transnote-pending-row',
+      });
+
+      const deviceName = String(device?.deviceName || '').trim();
+      const displayName = deviceName !== ''
+        ? deviceName
+        : `${syncthingDeviceId.slice(0, 7)}…`;
+
+      const label = new St.Label({
+        text: displayName,
+        x_expand: true,
+        style_class: 'transnote-pending-label',
+      });
+
+      const acceptButton = new St.Button({
+        label: 'Accept',
+        can_focus: true,
+        reactive: true,
+        style_class: 'button',
+      });
+
+      acceptButton.connect(
+        'clicked',
+        () => this._acceptPendingDevice({syncthingDeviceId})
+      );
+
+      row.add_child(label);
+      row.add_child(acceptButton);
+      this._pendingDevicesBox.add_child(row);
+    }
+  }
+
+  async _acceptPendingDevice(device) {
+    if (this._destroyed || this._busy)
+      return;
+
+    this._busy = true;
+
+    try {
+      const config = this._saveDraftSettings();
+
+      if (config.syncDir === '')
+        throw new Error('Enter a shared folder first.');
+
+      this._setupStatus.text = 'Accepting computer connection…';
+
+      const result = await this._helper.acceptPendingDeviceLan(
+        device.syncthingDeviceId,
+        this._cancellable
+      );
+
+      if (this._destroyed)
+        return;
+
+      const deviceName = String(result.deviceName || '').trim();
+      const displayName = deviceName !== ''
+        ? deviceName
+        : `${String(result.syncthingDeviceId || '').slice(0, 7)}…`;
+
+      this._setupStatus.text =
+        `Computer accepted: ${displayName}. Waiting for folder offer…`;
+
+      await this._refreshLanStatus();
+    } catch (error) {
+      if (!this._destroyed && !this._cancellable.is_cancelled())
+        this._setupStatus.text = operatorLanErrorMessage(error);
+    } finally {
+      this._busy = false;
+    }
+  }
+
   _renderPendingOffers(offers) {
     if (this._destroyed || !this._pendingOffersBox)
       return;
@@ -1484,20 +1594,30 @@ export class NotesMenuView {
       if (this._destroyed)
         return;
 
+      const pendingDevices = Array.isArray(result.pendingDevices)
+        ? result.pendingDevices
+        : [];
+      const pendingOffers = Array.isArray(result.pendingOffers)
+        ? result.pendingOffers
+        : [];
+
+      this._renderPendingDevices(pendingDevices);
+      this._renderPendingOffers(pendingOffers);
+
       let syncthingText;
       if (result.installed !== true)
         syncthingText = 'Syncthing: not installed';
       else if (result.running !== true)
         syncthingText = 'Syncthing: not running';
-      else if (Array.isArray(result.peers) && result.peers.some(peer => peer.connected === true))
+      else if (
+        Array.isArray(result.peers) &&
+        result.peers.some(peer => peer.connected === true)
+      )
         syncthingText = 'Syncthing: connected';
+      else if (pendingDevices.length > 0)
+        syncthingText = 'Syncthing: connection waiting';
       else
         syncthingText = 'Syncthing: running';
-
-      const pendingOffers = Array.isArray(result.pendingOffers)
-        ? result.pendingOffers
-        : [];
-      this._renderPendingOffers(pendingOffers);
 
       let folderText = pendingOffers.length > 0
         ? 'Folder: offer waiting'
@@ -1527,6 +1647,7 @@ export class NotesMenuView {
       }
     } catch (error) {
       if (!this._destroyed && !this._cancellable.is_cancelled()) {
+        this._renderPendingDevices([]);
         this._renderPendingOffers([]);
         this._lanRuntimeStatus.text = operatorLanErrorMessage(error);
       }
@@ -1763,6 +1884,7 @@ export class NotesMenuView {
     this._setupStatus = null;
     this._diagnostics = null;
     this._lanRuntimeStatus = null;
+    this._pendingDevicesBox = null;
     this._pendingOffersBox = null;
     this._pairingCodeEntry = null;
     this._copyPairingButton = null;

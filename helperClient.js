@@ -26,6 +26,7 @@ const COMMANDS = new Set([
   'lan-prepare',
   'lan-pair',
   'lan-join-existing',
+  'lan-accept-pending-device',
   'lan-accept-pending',
   'lan-status',
 ]);
@@ -267,6 +268,17 @@ export class HelperClient {
         syncthingDeviceId,
         folderId,
       },
+      cancellable
+    );
+  }
+
+  async acceptPendingDeviceLan(
+    syncthingDeviceId,
+    cancellable = null
+  ) {
+    return this._run(
+      'lan-accept-pending-device',
+      {syncthingDeviceId},
       cancellable
     );
   }

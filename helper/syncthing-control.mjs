@@ -105,9 +105,13 @@ function folderHasRemoteDevice(folder, localDeviceId) {
   });
 }
 
+function isTransnoteFolder(folder) {
+  return String(folder?.label ?? '') === 'transnote-lan';
+}
+
 function isReplaceableProvisionalFolder(folder, localDeviceId) {
   return GENERATED_TRANSNOTE_FOLDER_RE.test(String(folder?.id ?? '')) &&
-    String(folder?.label ?? '') === 'transnote-lan' &&
+    isTransnoteFolder(folder) &&
     folder?.type === 'sendreceive' &&
     folder?.paused !== true &&
     !folderHasRemoteDevice(folder, localDeviceId);
@@ -142,6 +146,46 @@ function pendingTransnoteOffers(pending, devices = []) {
     a.folderId.localeCompare(b.folderId) ||
     a.syncthingDeviceId.localeCompare(b.syncthingDeviceId)
   );
+  return offers;
+}
+
+function requireMatchingPendingOffer(pending, remote) {
+  const offer = pending?.[remote.folderId];
+
+  if (!offer?.offeredBy || typeof offer.offeredBy !== 'object')
+    return;
+
+  const offerers = Object.keys(offer.offeredBy);
+
+  if (
+    offerers.length > 0 &&
+    !offerers.includes(remote.syncthingDeviceId)
+  ) {
+    throw controlError(
+      'PENDING_OFFER_MISMATCH',
+      'Pending Syncthing folder offer does not match the pairing code'
+    );
+  }
+}
+
+function pendingDeviceOffers(pending) {
+  const offers = [];
+
+  for (const [syncthingDeviceId, details] of Object.entries(pending || {})) {
+    if (String(syncthingDeviceId).trim() === '')
+      continue;
+
+    offers.push({
+      syncthingDeviceId,
+      deviceName: String(details?.name ?? ''),
+      address: String(details?.address ?? ''),
+    });
+  }
+
+  offers.sort((a, b) =>
+    a.syncthingDeviceId.localeCompare(b.syncthingDeviceId)
+  );
+
   return offers;
 }
 
@@ -200,6 +244,23 @@ export function createSyncthingControl({
     );
     if (!pending || typeof pending !== 'object' || Array.isArray(pending))
       throw controlError('SYNCTHING_BAD_RESPONSE', 'Syncthing pending-folder shape is invalid');
+    return pending;
+  }
+
+  async function readPendingDevices() {
+    const pending = await readJson(
+      run,
+      ['cli', 'show', 'pending', 'devices'],
+      'Syncthing pending-device status'
+    );
+
+    if (!pending || typeof pending !== 'object' || Array.isArray(pending)) {
+      throw controlError(
+        'SYNCTHING_BAD_RESPONSE',
+        'Syncthing pending-device shape is invalid'
+      );
+    }
+
     return pending;
   }
 
@@ -269,27 +330,235 @@ export function createSyncthingControl({
         localTransnoteDeviceId,
         localSyncthingDeviceId: system.myID,
       });
+
       const config = await readConfig();
       const pending = await readPending();
       const cleanPath = normalizePath(syncDir);
+
       let byPath = folderAtPath(config.folders, cleanPath);
-      const byId = config.folders.find(folder => folder?.id === cleanRemote.folderId) || null;
+      const byId = config.folders.find(
+        folder => folder?.id === cleanRemote.folderId
+      ) || null;
 
-      if (byId && normalizePath(byId.path) !== cleanPath)
-        throw controlError('FOLDER_PATH_CONFLICT', 'This Syncthing folder id exists at another path');
+      let folder = null;
 
-      const offer = pending[cleanRemote.folderId];
-      if (offer && offer.offeredBy && typeof offer.offeredBy === 'object') {
-        const offerers = Object.keys(offer.offeredBy);
-        if (offerers.length > 0 && !offerers.includes(cleanRemote.syncthingDeviceId)) {
+      if (byPath) {
+        requireUsableFolder(byPath);
+
+        if (byPath.id === cleanRemote.folderId) {
+          requireMatchingPendingOffer(pending, cleanRemote);
+          folder = byPath;
+        } else if (
+          isReplaceableProvisionalFolder(byPath, system.myID)
+        ) {
+          if (byId && normalizePath(byId.path) !== cleanPath) {
+            throw controlError(
+              'FOLDER_PATH_CONFLICT',
+              'This Syncthing folder id exists at another path'
+            );
+          }
+
+          requireMatchingPendingOffer(pending, cleanRemote);
+
+          await run([
+            'cli',
+            'config',
+            'folders',
+            byPath.id,
+            'delete',
+          ]);
+
+          byPath = null;
+          folder = byId;
+        } else if (isTransnoteFolder(byPath)) {
+          // The local established TransNote share is authoritative.
+          folder = byPath;
+        } else {
           throw controlError(
-            'PENDING_OFFER_MISMATCH',
-            'Pending Syncthing folder offer does not match the pairing code'
+            'FOLDER_ID_CONFLICT',
+            'This path belongs to a different Syncthing folder id'
           );
         }
+      } else {
+        if (byId && normalizePath(byId.path) !== cleanPath) {
+          throw controlError(
+            'FOLDER_PATH_CONFLICT',
+            'This Syncthing folder id exists at another path'
+          );
+        }
+
+        requireMatchingPendingOffer(pending, cleanRemote);
+        folder = byId;
       }
 
-      if (byPath && byPath.id !== cleanRemote.folderId) {
+      const deviceExists = config.devices.some(
+        value => deviceIdOf(value) === cleanRemote.syncthingDeviceId
+      );
+
+      if (!deviceExists) {
+        await run([
+          'cli',
+          'config',
+          'devices',
+          'add',
+          '--device-id',
+          cleanRemote.syncthingDeviceId,
+        ]);
+      }
+
+      if (!folder) {
+        await run([
+          'cli',
+          'config',
+          'folders',
+          'add',
+          '--id',
+          cleanRemote.folderId,
+          '--label',
+          'transnote-lan',
+          '--path',
+          cleanPath,
+        ]);
+
+        folder = {
+          id: cleanRemote.folderId,
+          label: 'transnote-lan',
+          path: cleanPath,
+          type: 'sendreceive',
+          paused: false,
+          devices: [],
+        };
+      }
+
+      const effectiveFolderId = String(folder?.id ?? '');
+
+      if (effectiveFolderId === '') {
+        throw controlError(
+          'SYNCTHING_BAD_RESPONSE',
+          'TransNote Syncthing folder has no id'
+        );
+      }
+
+      if (!folderHasDevice(folder, cleanRemote.syncthingDeviceId)) {
+        await run([
+          'cli',
+          'config',
+          'folders',
+          effectiveFolderId,
+          'devices',
+          'add',
+          '--device-id',
+          cleanRemote.syncthingDeviceId,
+        ]);
+      }
+
+      return {
+        peer: {
+          transnoteDeviceId: cleanRemote.transnoteDeviceId,
+          syncthingDeviceId: cleanRemote.syncthingDeviceId,
+          folderId: effectiveFolderId,
+        },
+      };
+    },
+
+    async acceptPendingDevice({syncthingDeviceId}) {
+      const system = await readSystem();
+      const config = await readConfig();
+      const pending = await readPendingDevices();
+
+      const cleanDeviceId = String(syncthingDeviceId ?? '').trim();
+
+      const configuredDevice = config.devices.find(
+        value => deviceIdOf(value) === cleanDeviceId
+      ) || null;
+
+      const details = pending[cleanDeviceId] || null;
+
+      if (
+        cleanDeviceId === '' ||
+        cleanDeviceId === system.myID ||
+        (!details && !configuredDevice)
+      ) {
+        throw controlError(
+          'PENDING_DEVICE_NOT_FOUND',
+          'Selected pending Syncthing device was not found'
+        );
+      }
+
+      if (!configuredDevice) {
+        await run([
+          'cli',
+          'config',
+          'devices',
+          'add',
+          '--device-id',
+          cleanDeviceId,
+        ]);
+      }
+
+      return {
+        syncthingDeviceId: cleanDeviceId,
+        deviceName: String(
+          details?.name ??
+          configuredDevice?.name ??
+          ''
+        ),
+        address: String(details?.address ?? ''),
+      };
+    },
+
+    async acceptPending({syncDir, folderId, syncthingDeviceId}) {
+      const system = await readSystem();
+      const config = await readConfig();
+      const pending = await readPending();
+
+      const cleanFolderId = String(folderId ?? '').trim();
+      const cleanDeviceId = String(syncthingDeviceId ?? '').trim();
+
+      const offer = pending[cleanFolderId];
+      const details = offer?.offeredBy?.[cleanDeviceId];
+
+      if (!details) {
+        throw controlError(
+          'PENDING_OFFER_NOT_FOUND',
+          'Selected pending folder offer was not found'
+        );
+      }
+
+      if (String(details.label ?? '') !== 'transnote-lan') {
+        throw controlError(
+          'PENDING_OFFER_NOT_TRANSNOTE',
+          'Selected pending folder offer is not labeled transnote-lan'
+        );
+      }
+
+      const configuredDevice = config.devices.find(
+        value => deviceIdOf(value) === cleanDeviceId
+      );
+
+      if (!configuredDevice) {
+        throw controlError(
+          'PENDING_DEVICE_NOT_CONFIGURED',
+          'Offering Syncthing device is not configured locally'
+        );
+      }
+
+      const cleanPath = normalizePath(syncDir);
+      let byPath = folderAtPath(config.folders, cleanPath);
+      const byId = config.folders.find(
+        folder => folder?.id === cleanFolderId
+      ) || null;
+
+      if (byId && normalizePath(byId.path) !== cleanPath) {
+        throw controlError(
+          'FOLDER_PATH_CONFLICT',
+          'This Syncthing folder id exists at another path'
+        );
+      }
+
+      if (byPath && byPath.id !== cleanFolderId) {
+        requireUsableFolder(byPath);
+
         if (!isReplaceableProvisionalFolder(byPath, system.myID)) {
           throw controlError(
             'FOLDER_ID_CONFLICT',
@@ -304,105 +573,30 @@ export function createSyncthingControl({
           byPath.id,
           'delete',
         ]);
+
         byPath = null;
       }
-
-      const existingFolder = byPath || byId;
-      requireUsableFolder(existingFolder);
-
-      const deviceExists = config.devices.some(
-        value => deviceIdOf(value) === cleanRemote.syncthingDeviceId
-      );
-      if (!deviceExists) {
-        await run([
-          'cli', 'config', 'devices', 'add',
-          '--device-id', cleanRemote.syncthingDeviceId,
-        ]);
-      }
-
-      let folder = existingFolder;
-      if (!folder) {
-        await run([
-          'cli', 'config', 'folders', 'add',
-          '--id', cleanRemote.folderId,
-          '--label', 'transnote-lan',
-          '--path', cleanPath,
-        ]);
-        folder = {
-          id: cleanRemote.folderId,
-          path: cleanPath,
-          type: 'sendreceive',
-          paused: false,
-          devices: [],
-        };
-      }
-
-      if (!folderHasDevice(folder, cleanRemote.syncthingDeviceId)) {
-        await run([
-          'cli', 'config', 'folders', cleanRemote.folderId,
-          'devices', 'add',
-          '--device-id', cleanRemote.syncthingDeviceId,
-        ]);
-      }
-
-      return {
-        peer: {
-          transnoteDeviceId: cleanRemote.transnoteDeviceId,
-          syncthingDeviceId: cleanRemote.syncthingDeviceId,
-          folderId: cleanRemote.folderId,
-        },
-      };
-    },
-
-    async acceptPending({syncDir, folderId, syncthingDeviceId}) {
-      await readSystem();
-      const config = await readConfig();
-      const pending = await readPending();
-      const cleanFolderId = String(folderId ?? '').trim();
-      const cleanDeviceId = String(syncthingDeviceId ?? '').trim();
-      const offer = pending[cleanFolderId];
-      const details = offer?.offeredBy?.[cleanDeviceId];
-
-      if (!details)
-        throw controlError('PENDING_OFFER_NOT_FOUND', 'Selected pending folder offer was not found');
-      if (String(details.label ?? '') !== 'transnote-lan') {
-        throw controlError(
-          'PENDING_OFFER_NOT_TRANSNOTE',
-          'Selected pending folder offer is not labeled transnote-lan'
-        );
-      }
-
-      const configuredDevice = config.devices.find(
-        value => deviceIdOf(value) === cleanDeviceId
-      );
-      if (!configuredDevice) {
-        throw controlError(
-          'PENDING_DEVICE_NOT_CONFIGURED',
-          'Offering Syncthing device is not configured locally'
-        );
-      }
-
-      const cleanPath = normalizePath(syncDir);
-      const byPath = folderAtPath(config.folders, cleanPath);
-      const byId = config.folders.find(folder => folder?.id === cleanFolderId) || null;
-
-      if (byPath && byPath.id !== cleanFolderId)
-        throw controlError('FOLDER_ID_CONFLICT', 'This path belongs to a different Syncthing folder id');
-      if (byId && normalizePath(byId.path) !== cleanPath)
-        throw controlError('FOLDER_PATH_CONFLICT', 'This Syncthing folder id exists at another path');
 
       let folder = byPath || byId;
       requireUsableFolder(folder);
 
       if (!folder) {
         await run([
-          'cli', 'config', 'folders', 'add',
-          '--id', cleanFolderId,
-          '--label', 'transnote-lan',
-          '--path', cleanPath,
+          'cli',
+          'config',
+          'folders',
+          'add',
+          '--id',
+          cleanFolderId,
+          '--label',
+          'transnote-lan',
+          '--path',
+          cleanPath,
         ]);
+
         folder = {
           id: cleanFolderId,
+          label: 'transnote-lan',
           path: cleanPath,
           type: 'sendreceive',
           paused: false,
@@ -412,14 +606,19 @@ export function createSyncthingControl({
 
       if (!folderHasDevice(folder, cleanDeviceId)) {
         await run([
-          'cli', 'config', 'folders', cleanFolderId,
-          'devices', 'add',
-          '--device-id', cleanDeviceId,
+          'cli',
+          'config',
+          'folders',
+          folder.id,
+          'devices',
+          'add',
+          '--device-id',
+          cleanDeviceId,
         ]);
       }
 
       return {
-        folderId: cleanFolderId,
+        folderId: folder.id,
         folderPath: cleanPath,
         syncthingDeviceId: cleanDeviceId,
         deviceName: String(configuredDevice.name ?? ''),
@@ -428,6 +627,7 @@ export function createSyncthingControl({
 
     async status({syncDir, peers = []}) {
       let system;
+
       try {
         system = await readSystem();
       } catch (error) {
@@ -440,9 +640,10 @@ export function createSyncthingControl({
             peers: [],
             pendingFolders: 0,
             pendingOffers: [],
-            pendingOffers: [],
+            pendingDevices: [],
           };
         }
+
         if (error?.code === 'SYNCTHING_NOT_RUNNING') {
           return {
             installed: true,
@@ -451,15 +652,23 @@ export function createSyncthingControl({
             folder: {configured: false},
             peers: [],
             pendingFolders: 0,
+            pendingOffers: [],
+            pendingDevices: [],
           };
         }
+
         throw error;
       }
 
       const config = await readConfig();
       const connections = await readConnections();
-      const pending = await readPending();
-      const folder = syncDir ? folderAtPath(config.folders, syncDir) : null;
+      const pendingFolders = await readPending();
+      const pendingDevices = await readPendingDevices();
+
+      const folder = syncDir
+        ? folderAtPath(config.folders, syncDir)
+        : null;
+
       const folderState = folder
         ? {
             configured: true,
@@ -474,16 +683,19 @@ export function createSyncthingControl({
         const deviceConfigured = config.devices.some(
           value => deviceIdOf(value) === peer.syncthingDeviceId
         );
+
         const folderConfigured = Boolean(
           folder &&
           folder.id === peer.folderId &&
           folderHasDevice(folder, peer.syncthingDeviceId)
         );
+
         return {
           transnoteDeviceId: peer.transnoteDeviceId,
           syncthingDeviceId: peer.syncthingDeviceId,
           configured: deviceConfigured && folderConfigured,
-          connected: connections[peer.syncthingDeviceId]?.connected === true,
+          connected:
+            connections[peer.syncthingDeviceId]?.connected === true,
         };
       });
 
@@ -493,8 +705,12 @@ export function createSyncthingControl({
         localDeviceId: system.myID,
         folder: folderState,
         peers: peerStates,
-        pendingFolders: Object.keys(pending).length,
-        pendingOffers: pendingTransnoteOffers(pending, config.devices),
+        pendingFolders: Object.keys(pendingFolders).length,
+        pendingOffers: pendingTransnoteOffers(
+          pendingFolders,
+          config.devices
+        ),
+        pendingDevices: pendingDeviceOffers(pendingDevices),
       };
     },
   };

@@ -1615,6 +1615,11 @@ export class NotesMenuView {
       else if (result.running !== true)
         this._syncStatus.text = 'Syncthing is not running.';
       else if (
+        result.folder?.configured === true &&
+        result.folder.paused === true
+      )
+        this._syncStatus.text = 'The TransNote sync folder is paused.';
+      else if (
         Array.isArray(result.peers) &&
         result.peers.some(
           peer => peer.configured === true && peer.connected !== true

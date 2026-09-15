@@ -93,6 +93,19 @@ class LanSetupUiTests(unittest.TestCase):
         ):
             self.assertIn(text, self.source)
 
+    def test_paused_transnote_folder_is_reported_before_peer_disconnect(self):
+        source = " ".join(self.source.split())
+        paused_check = "result.folder?.configured === true && result.folder.paused === true"
+        paused_message = "this._syncStatus.text = 'The TransNote sync folder is paused.';"
+        peer_check = "peer.configured === true && peer.connected !== true"
+
+        self.assertIn(paused_check, source)
+        self.assertIn(paused_message, source)
+        self.assertLess(
+            source.index(paused_check),
+            source.index(peer_check),
+        )
+
     def test_configured_disconnected_peer_is_reported_in_visible_status(self):
         self.assertIn(
             "peer.configured === true && peer.connected !== true",

@@ -45,7 +45,7 @@ class Version4BaselineTests(unittest.TestCase):
 
         self.assertEqual(metadata["uuid"], "transnote@aridev1")
         self.assertEqual(metadata["version"], 4)
-        self.assertEqual(metadata["shell-version"], ["46"])
+        self.assertEqual(metadata["shell-version"], ["46", "50"])
         self.assertEqual(
             metadata["url"],
             "https://github.com/ariDev1/transNote-ubuntu",

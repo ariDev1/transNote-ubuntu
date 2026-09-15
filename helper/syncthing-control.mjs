@@ -9,6 +9,7 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 5000;
 const MAX_BUFFER_BYTES = 1024 * 1024;
+const GENERATED_TRANSNOTE_FOLDER_RE = /^tn-[0-9a-f]{16}$/;
 
 function controlError(code, message, cause) {
   const error = new Error(message, cause ? {cause} : undefined);
@@ -92,6 +93,24 @@ function deviceIdOf(value) {
 function folderHasDevice(folder, deviceId) {
   return Array.isArray(folder?.devices) &&
     folder.devices.some(value => deviceIdOf(value) === deviceId);
+}
+
+function folderHasRemoteDevice(folder, localDeviceId) {
+  if (!Array.isArray(folder?.devices))
+    return false;
+
+  return folder.devices.some(value => {
+    const deviceId = deviceIdOf(value);
+    return deviceId !== '' && deviceId !== localDeviceId;
+  });
+}
+
+function isReplaceableProvisionalFolder(folder, localDeviceId) {
+  return GENERATED_TRANSNOTE_FOLDER_RE.test(String(folder?.id ?? '')) &&
+    String(folder?.label ?? '') === 'transnote-lan' &&
+    folder?.type === 'sendreceive' &&
+    folder?.paused !== true &&
+    !folderHasRemoteDevice(folder, localDeviceId);
 }
 
 function deviceNameOf(devices, deviceId) {
@@ -253,16 +272,11 @@ export function createSyncthingControl({
       const config = await readConfig();
       const pending = await readPending();
       const cleanPath = normalizePath(syncDir);
-      const byPath = folderAtPath(config.folders, cleanPath);
+      let byPath = folderAtPath(config.folders, cleanPath);
       const byId = config.folders.find(folder => folder?.id === cleanRemote.folderId) || null;
 
-      if (byPath && byPath.id !== cleanRemote.folderId)
-        throw controlError('FOLDER_ID_CONFLICT', 'This path belongs to a different Syncthing folder id');
       if (byId && normalizePath(byId.path) !== cleanPath)
         throw controlError('FOLDER_PATH_CONFLICT', 'This Syncthing folder id exists at another path');
-
-      const existingFolder = byPath || byId;
-      requireUsableFolder(existingFolder);
 
       const offer = pending[cleanRemote.folderId];
       if (offer && offer.offeredBy && typeof offer.offeredBy === 'object') {
@@ -274,6 +288,27 @@ export function createSyncthingControl({
           );
         }
       }
+
+      if (byPath && byPath.id !== cleanRemote.folderId) {
+        if (!isReplaceableProvisionalFolder(byPath, system.myID)) {
+          throw controlError(
+            'FOLDER_ID_CONFLICT',
+            'This path belongs to a different Syncthing folder id'
+          );
+        }
+
+        await run([
+          'cli',
+          'config',
+          'folders',
+          byPath.id,
+          'delete',
+        ]);
+        byPath = null;
+      }
+
+      const existingFolder = byPath || byId;
+      requireUsableFolder(existingFolder);
 
       const deviceExists = config.devices.some(
         value => deviceIdOf(value) === cleanRemote.syncthingDeviceId

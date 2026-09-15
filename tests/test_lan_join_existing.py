@@ -180,6 +180,113 @@ class LanJoinExistingTests(unittest.TestCase):
         ]
         self.assertEqual(folder_adds, [expected_folder_add])
 
+    def test_join_existing_replaces_unused_provisional_transnote_folder(self):
+        provisional_id = "tn-0123456789abcdef"
+        config = {
+            "folders": [
+                {
+                    "id": provisional_id,
+                    "label": "transnote-lan",
+                    "path": str(self.sync_dir.resolve()),
+                    "type": "sendreceive",
+                    "paused": False,
+                    "devices": [
+                        {"deviceID": LOCAL_SYNCTHING_ID},
+                    ],
+                }
+            ],
+            "devices": [],
+        }
+
+        result = run_helper(
+            "lan-join-existing",
+            data_dir=self.data_dir,
+            sync_dir=self.sync_dir,
+            fake_syncthing=self.fake_syncthing,
+            log_path=self.log_path,
+            config=config,
+            input_value=self.join_input(),
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        value = json.loads(result.stdout)
+        self.assertEqual(value["peer"]["folderId"], REMOTE_FOLDER_ID)
+        self.assertEqual(self.local_snapshot.read_bytes(), self.snapshot_bytes)
+
+        commands = read_commands(self.log_path)
+        delete_command = [
+            "cli",
+            "config",
+            "folders",
+            provisional_id,
+            "delete",
+        ]
+        add_command = [
+            "cli",
+            "config",
+            "folders",
+            "add",
+            "--id",
+            REMOTE_FOLDER_ID,
+            "--label",
+            "transnote-lan",
+            "--path",
+            str(self.sync_dir.resolve()),
+        ]
+
+        self.assertIn(delete_command, commands)
+        self.assertIn(add_command, commands)
+        self.assertLess(
+            commands.index(delete_command),
+            commands.index(add_command),
+        )
+
+    def test_join_existing_keeps_shared_transnote_folder_fail_closed(self):
+        existing_id = "tn-fedcba9876543210"
+        config = {
+            "folders": [
+                {
+                    "id": existing_id,
+                    "label": "transnote-lan",
+                    "path": str(self.sync_dir.resolve()),
+                    "type": "sendreceive",
+                    "paused": False,
+                    "devices": [
+                        {"deviceID": LOCAL_SYNCTHING_ID},
+                        {"deviceID": REMOTE_SYNCTHING_ID},
+                    ],
+                }
+            ],
+            "devices": [],
+        }
+
+        result = run_helper(
+            "lan-join-existing",
+            data_dir=self.data_dir,
+            sync_dir=self.sync_dir,
+            fake_syncthing=self.fake_syncthing,
+            log_path=self.log_path,
+            config=config,
+            input_value=self.join_input(),
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        value = json.loads(result.stderr)
+        self.assertEqual(value["error"]["code"], "FOLDER_ID_CONFLICT")
+        self.assertEqual(self.local_snapshot.read_bytes(), self.snapshot_bytes)
+
+        commands = read_commands(self.log_path)
+        self.assertNotIn(
+            [
+                "cli",
+                "config",
+                "folders",
+                existing_id,
+                "delete",
+            ],
+            commands,
+        )
+
     def test_join_existing_fails_closed_on_path_folder_id_conflict(self):
         config = {
             "folders": [

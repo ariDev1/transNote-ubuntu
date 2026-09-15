@@ -1614,6 +1614,13 @@ export class NotesMenuView {
         this._syncStatus.text = 'Syncthing is not installed.';
       else if (result.running !== true)
         this._syncStatus.text = 'Syncthing is not running.';
+      else if (
+        Array.isArray(result.peers) &&
+        result.peers.some(
+          peer => peer.configured === true && peer.connected !== true
+        )
+      )
+        this._syncStatus.text = 'A paired computer is not connected.';
       else
         this._syncStatus.text = 'Sync service: ready';
 

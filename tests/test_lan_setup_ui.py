@@ -93,6 +93,16 @@ class LanSetupUiTests(unittest.TestCase):
         ):
             self.assertIn(text, self.source)
 
+    def test_configured_disconnected_peer_is_reported_in_visible_status(self):
+        self.assertIn(
+            "peer.configured === true && peer.connected !== true",
+            self.source,
+        )
+        self.assertIn(
+            "this._syncStatus.text = 'A paired computer is not connected.';",
+            self.source,
+        )
+
     def test_setup_styles_keep_advanced_controls_structured(self):
         for selector in (
             ".transnote-machine-name",

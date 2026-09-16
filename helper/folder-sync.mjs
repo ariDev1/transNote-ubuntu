@@ -1,7 +1,7 @@
 import {
   chmod,
-  readFile,
-  readdir,
+  open,
+  opendir,
   rename,
   rm,
   writeFile,
@@ -19,10 +19,73 @@ import {
 const require = createRequire(import.meta.url);
 const Store = require('../core/Store.js');
 
+const MAX_PEER_FILES = 32;
+const MAX_PEER_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_PEER_AGGREGATE_BYTES = 8 * 1024 * 1024;
+
 function syncError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+function isPeerSnapshotName(name, ownName) {
+  return name.endsWith('.json') &&
+    name !== ownName &&
+    !Store.isSyncArtifact(name);
+}
+
+async function openPeerSnapshot(path) {
+  const handle = await open(path, 'r');
+
+  try {
+    const info = await handle.stat();
+    const size = Number(info.size);
+
+    if (
+      !info.isFile() ||
+      !Number.isSafeInteger(size) ||
+      size < 0
+    ) {
+      throw syncError('PEER_FILE_INVALID', 'peer snapshot is not a regular file');
+    }
+
+    if (size > MAX_PEER_FILE_BYTES) {
+      throw syncError('PEER_FILE_TOO_LARGE', 'peer snapshot exceeds byte limit');
+    }
+
+    return {handle, size};
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+async function readPeerSnapshotBytes(handle, size) {
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+
+  while (offset < size) {
+    const result = await handle.read(
+      bytes,
+      offset,
+      size - offset,
+      offset
+    );
+
+    if (result.bytesRead === 0) {
+      throw syncError('PEER_FILE_CHANGED', 'peer snapshot changed during read');
+    }
+
+    offset += result.bytesRead;
+  }
+
+  const after = await handle.stat();
+  if (after.size !== size) {
+    throw syncError('PEER_FILE_CHANGED', 'peer snapshot changed during read');
+  }
+
+  return bytes.toString('utf8');
 }
 
 function validateDeviceId(value) {
@@ -146,33 +209,56 @@ export async function readPeerSnapshots({
   if (!config.configured)
     return {notes: [], pairs: [], deletedIds: {}, diagnostics};
 
-  let entries;
+  const ownName = `${config.deviceId}.json`;
+  const files = [];
+  let directory;
+
   try {
-    entries = await readdir(config.syncDir, {withFileTypes: true});
+    directory = await opendir(config.syncDir);
+
+    for await (const entry of directory) {
+      if (!entry.isFile() || !isPeerSnapshotName(entry.name, ownName))
+        continue;
+
+      diagnostics.files++;
+      if (diagnostics.files > MAX_PEER_FILES) {
+        diagnostics.errors++;
+        return {notes: [], pairs: [], deletedIds: {}, diagnostics};
+      }
+
+      files.push(entry.name);
+    }
   } catch (error) {
     if (error.code === 'ENOENT')
       return {notes: [], pairs: [], deletedIds: {}, diagnostics};
     throw error;
   }
 
-  const ownName = `${config.deviceId}.json`;
-  const files = entries
-    .filter(entry => entry.isFile())
-    .map(entry => entry.name)
-    .filter(name => name.endsWith('.json'))
-    .filter(name => name !== ownName)
-    .filter(name => !Store.isSyncArtifact(name))
-    .sort();
-
-  diagnostics.files = files.length;
+  files.sort();
 
   const allNotes = [];
   const allPairs = [];
   let deletedIds = {};
+  let acceptedBytes = 0;
 
   for (const name of files) {
+    let peerFile;
+
     try {
-      const raw = await readFile(join(config.syncDir, name), 'utf8');
+      peerFile = await openPeerSnapshot(join(config.syncDir, name));
+
+      if (acceptedBytes + peerFile.size > MAX_PEER_AGGREGATE_BYTES) {
+        throw syncError(
+          'PEER_AGGREGATE_TOO_LARGE',
+          'peer snapshot aggregate exceeds byte limit'
+        );
+      }
+
+      acceptedBytes += peerFile.size;
+      const raw = await readPeerSnapshotBytes(
+        peerFile.handle,
+        peerFile.size
+      );
       const parsed = JSON.parse(raw);
       diagnostics.fetched++;
 
@@ -201,6 +287,9 @@ export async function readPeerSnapshots({
       allPairs.push(...Store.sanitizeOutbox(parsed?.noteComments));
     } catch {
       diagnostics.errors++;
+    } finally {
+      if (peerFile)
+        await peerFile.handle.close();
     }
   }
 

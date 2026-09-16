@@ -110,6 +110,150 @@ console.log(JSON.stringify({
         self.assertEqual(value["knownIds"], ["peer-1"])
 
 
+
+class UnreadCommentTests(unittest.TestCase):
+    def test_new_peer_comment_triggers_unread(self):
+        result = run_model("""
+let value = advancePeerNoteKnowledge({
+  notes: [{
+    id: 'local-note',
+    comments: [],
+  }],
+  localIds: new Set(['local-note']),
+  localDeviceId: 'desktop',
+  knownIds: new Set(),
+  knownCommentIds: new Set(),
+  primed: false,
+});
+
+value = advancePeerNoteKnowledge({
+  notes: [{
+    id: 'local-note',
+    comments: [{
+      id: 'comment-1',
+      author: 'laptop',
+      text: 'peer reply',
+    }],
+  }],
+  localIds: new Set(['local-note']),
+  localDeviceId: 'desktop',
+  knownIds: value.knownIds,
+  knownCommentIds: value.knownCommentIds,
+  primed: value.primed,
+});
+
+console.log(JSON.stringify({
+  unread: value.hasUnread === true,
+  peerComment: value.hasNewPeerComment === true,
+  knownCommentCount: value.knownCommentIds instanceof Set
+    ? value.knownCommentIds.size
+    : 0,
+}));
+""")
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        value = json.loads(result.stdout)
+        self.assertTrue(value["unread"])
+        self.assertTrue(value["peerComment"])
+        self.assertEqual(value["knownCommentCount"], 1)
+
+    def test_own_comment_does_not_trigger_unread(self):
+        result = run_model("""
+let value = advancePeerNoteKnowledge({
+  notes: [{
+    id: 'local-note',
+    comments: [],
+  }],
+  localIds: new Set(['local-note']),
+  localDeviceId: 'desktop',
+  knownIds: new Set(),
+  knownCommentIds: new Set(),
+  primed: false,
+});
+
+value = advancePeerNoteKnowledge({
+  notes: [{
+    id: 'local-note',
+    comments: [{
+      id: 'comment-local',
+      author: 'desktop',
+      text: 'my reply',
+    }],
+  }],
+  localIds: new Set(['local-note']),
+  localDeviceId: 'desktop',
+  knownIds: value.knownIds,
+  knownCommentIds: value.knownCommentIds,
+  primed: value.primed,
+});
+
+console.log(JSON.stringify({
+  unread: value.hasUnread === true,
+  peerComment: value.hasNewPeerComment === true,
+}));
+""")
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        value = json.loads(result.stdout)
+        self.assertFalse(value["unread"])
+        self.assertFalse(value["peerComment"])
+
+    def test_first_snapshot_primes_peer_comments_without_unread(self):
+        result = run_model("""
+const value = advancePeerNoteKnowledge({
+  notes: [{
+    id: 'local-note',
+    comments: [{
+      id: 'comment-existing',
+      author: 'laptop',
+      text: 'already present',
+    }],
+  }],
+  localIds: new Set(['local-note']),
+  localDeviceId: 'desktop',
+  knownIds: new Set(),
+  knownCommentIds: new Set(),
+  primed: false,
+});
+
+console.log(JSON.stringify({
+  unread: value.hasUnread === true,
+  knownCommentCount: value.knownCommentIds instanceof Set
+    ? value.knownCommentIds.size
+    : 0,
+}));
+""")
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        value = json.loads(result.stdout)
+        self.assertFalse(value["unread"])
+        self.assertEqual(value["knownCommentCount"], 1)
+
+    def test_notes_menu_tracks_peer_comment_state(self):
+        source = (ROOT / "notesMenu.js").read_text()
+
+        self.assertIn("_knownPeerCommentIds", source)
+        self.assertIn(
+            "knownCommentIds: this._knownPeerCommentIds",
+            source,
+        )
+        self.assertIn(
+            "this._knownPeerCommentIds = peerKnowledge.knownCommentIds",
+            source,
+        )
+        self.assertIn(
+            "peerKnowledge.hasNewPeerNote",
+            source,
+        )
+        self.assertIn(
+            "peerKnowledge.hasNewPeerComment",
+            source,
+        )
+
+
 class UnreadIndicatorUiTests(unittest.TestCase):
     def test_indicator_keeps_existing_icon_and_adds_unread_dot(self):
         source = (ROOT / "indicator.js").read_text()

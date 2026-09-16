@@ -72,6 +72,39 @@
   background-color: rgba(255, 255, 255, 0.055);
 }
 
+
+.transnote-note:hover {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.transnote-note.transnote-note-expanded {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.transnote-note-toggle {
+  padding: 2px 4px 2px 0;
+  border-radius: 6px;
+}
+
+.transnote-note-toggle-content {
+  spacing: 7px;
+}
+
+.transnote-note-disclosure {
+  min-width: 12px;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.transnote-note-preview {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.transnote-note-summary {
+  margin-top: 1px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.85em;
+}
+
 .transnote-note-header {
   spacing: 8px;
 }

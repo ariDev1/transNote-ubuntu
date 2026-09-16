@@ -10,6 +10,10 @@ import {
   canUseAttachment,
 } from './attachmentUiModel.js';
 import {advancePeerNoteKnowledge} from './unreadUiModel.js';
+import {
+  compactNotePreview,
+  compactNoteSummary,
+} from './noteUiModel.js';
 
 const POLL_SECONDS = 15;
 
@@ -34,7 +38,11 @@ export class NotesMenuView {
         ? onUnreadChanged
         : null;
     this._knownPeerNoteIds = new Set();
+    this._knownPeerCommentIds = new Set();
     this._peerNotesPrimed = false;
+    this._expandedNoteId = '';
+    this._lastNotes = [];
+    this._lastAttachmentStates = {};
     this._busy = false;
     this._destroyed = false;
     this._refreshBusy = false;
@@ -642,15 +650,22 @@ export class NotesMenuView {
       const peerKnowledge = advancePeerNoteKnowledge({
         notes,
         localIds: this._localIds,
+        localDeviceId: this._settings.get_string('device-id').trim(),
         knownIds: this._knownPeerNoteIds,
+        knownCommentIds: this._knownPeerCommentIds,
         primed: this._peerNotesPrimed,
       });
 
       this._knownPeerNoteIds = peerKnowledge.knownIds;
+      this._knownPeerCommentIds = peerKnowledge.knownCommentIds;
       this._peerNotesPrimed = peerKnowledge.primed;
 
-      if (peerKnowledge.hasNewPeerNote)
+      if (
+        peerKnowledge.hasNewPeerNote ||
+        peerKnowledge.hasNewPeerComment
+      ) {
         this._onUnreadChanged?.(true);
+      }
 
       this._diagnosticState = result.diagnostics || null;
 
@@ -659,6 +674,9 @@ export class NotesMenuView {
         typeof result.attachmentStates === 'object'
           ? result.attachmentStates
           : {};
+
+      this._lastNotes = notes;
+      this._lastAttachmentStates = attachmentStates;
 
       const hiddenCount = Number.isInteger(result.hiddenCount)
         ? result.hiddenCount
@@ -692,6 +710,7 @@ export class NotesMenuView {
       child.destroy();
 
     if (notes.length === 0) {
+      this._expandedNoteId = '';
       this._notesBox.add_child(new St.Label({
         text: 'No notes yet.',
         style_class: 'transnote-empty',
@@ -699,20 +718,52 @@ export class NotesMenuView {
       return;
     }
 
+    const noteIds = new Set(
+      notes.map(note => String(note?.id ?? '').trim())
+    );
+    if (!noteIds.has(this._expandedNoteId))
+      this._expandedNoteId = '';
+
     const deviceId = this._settings.get_string('device-id').trim();
 
     for (const note of notes) {
+      const noteId = String(note.id ?? '').trim();
+      const expanded = noteId !== '' && this._expandedNoteId === noteId;
       const noteColorClass = note.color
         ? ` transnote-note-color-${note.color}`
+        : '';
+      const expandedClass = expanded
+        ? ' transnote-note-expanded'
         : '';
 
       const box = new St.BoxLayout({
         vertical: true,
-        style_class: `transnote-note${noteColorClass}`,
+        reactive: true,
+        track_hover: true,
+        style_class:
+          `transnote-note${noteColorClass}${expandedClass}`,
       });
+
       const header = new St.BoxLayout({
         style_class: 'transnote-note-header',
       });
+
+      const toggleButton = new St.Button({
+        can_focus: true,
+        reactive: true,
+        x_expand: true,
+        style_class: 'transnote-note-toggle',
+      });
+
+      const toggleContent = new St.BoxLayout({
+        x_expand: true,
+        style_class: 'transnote-note-toggle-content',
+      });
+
+      toggleContent.add_child(new St.Label({
+        text: expanded ? '▾' : '▸',
+        style_class: 'transnote-note-disclosure',
+      }));
 
       const title = new St.Label({
         text: String(note.title || 'Untitled'),
@@ -721,10 +772,20 @@ export class NotesMenuView {
       });
       title.clutter_text.line_wrap = true;
       title.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
-      header.add_child(title);
+      toggleContent.add_child(title);
+
+      toggleButton.set_child(toggleContent);
+      toggleButton.connect(
+        'clicked',
+        () => this._toggleNoteExpanded(noteId)
+      );
+      header.add_child(toggleButton);
 
       const isLocal = this._localIds.has(note.id);
-      const canShare = isLocal && deviceId !== '' && note.author === deviceId;
+      const canShare =
+        isLocal &&
+        deviceId !== '' &&
+        note.author === deviceId;
 
       if (canShare) {
         const shareButton = new St.Button({
@@ -754,6 +815,43 @@ export class NotesMenuView {
         }));
       }
 
+      const attachments = Array.isArray(note.attachments)
+        ? note.attachments
+        : [];
+      const comments = Array.isArray(note.comments)
+        ? note.comments
+        : [];
+
+      if (!expanded) {
+        const previewText = compactNotePreview(note.body);
+
+        if (previewText !== '') {
+          const preview = new St.Label({
+            text: previewText,
+            x_expand: true,
+            style_class: 'transnote-note-preview',
+          });
+          preview.clutter_text.line_wrap = true;
+          preview.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+          box.add_child(preview);
+        }
+
+        const summaryText = compactNoteSummary({
+          comments,
+          attachments,
+        });
+
+        if (summaryText !== '') {
+          box.add_child(new St.Label({
+            text: summaryText,
+            style_class: 'transnote-note-summary',
+          }));
+        }
+
+        this._notesBox.add_child(box);
+        continue;
+      }
+
       const body = new St.Label({
         text: String(note.body || ''),
         style_class: 'transnote-note-body',
@@ -764,10 +862,6 @@ export class NotesMenuView {
       body.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
 
       box.add_child(body);
-
-      const attachments = Array.isArray(note.attachments)
-        ? note.attachments
-        : [];
 
       if (attachments.length > 0) {
         const attachmentBox = new St.BoxLayout({
@@ -861,10 +955,6 @@ export class NotesMenuView {
         box.add_child(attachmentBox);
       }
 
-      const comments = Array.isArray(note.comments)
-        ? note.comments
-        : [];
-
       const commentsBox = new St.BoxLayout({
         vertical: true,
         style_class: 'transnote-comments',
@@ -881,17 +971,18 @@ export class NotesMenuView {
           style_class: 'transnote-comment-author',
         });
 
-        const body = new St.Label({
+        const commentBody = new St.Label({
           text: String(comment.text || ''),
           x_expand: true,
           style_class: 'transnote-comment-text',
         });
 
-        body.clutter_text.line_wrap = true;
-        body.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+        commentBody.clutter_text.line_wrap = true;
+        commentBody.clutter_text.line_wrap_mode =
+          Pango.WrapMode.WORD_CHAR;
 
         row.add_child(author);
-        row.add_child(body);
+        row.add_child(commentBody);
         commentsBox.add_child(row);
       }
 
@@ -999,7 +1090,10 @@ export class NotesMenuView {
           reactive: true,
           style_class: 'button transnote-note-action',
         });
-        deleteButton.connect('clicked', () => this._deleteNote(note.id));
+        deleteButton.connect(
+          'clicked',
+          () => this._deleteNote(note.id)
+        );
         actions.add_child(deleteButton);
       } else {
         const hideButton = new St.Button({
@@ -1008,13 +1102,35 @@ export class NotesMenuView {
           reactive: true,
           style_class: 'button transnote-note-action',
         });
-        hideButton.connect('clicked', () => this._hideNote(note.id));
+        hideButton.connect(
+          'clicked',
+          () => this._hideNote(note.id)
+        );
         actions.add_child(hideButton);
       }
 
       box.add_child(actions);
       this._notesBox.add_child(box);
     }
+  }
+
+  _toggleNoteExpanded(noteId) {
+    if (this._destroyed)
+      return;
+
+    const id = String(noteId ?? '').trim();
+    if (id === '')
+      return;
+
+    this._expandedNoteId =
+      this._expandedNoteId === id
+        ? ''
+        : id;
+
+    this._renderNotes(
+      this._lastNotes,
+      this._lastAttachmentStates
+    );
   }
 
   _openRepository() {

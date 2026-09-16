@@ -13,6 +13,7 @@ import {advancePeerNoteKnowledge} from './unreadUiModel.js';
 import {
   compactNotePreview,
   compactNoteSummary,
+  filterNotes,
 } from './noteUiModel.js';
 
 const POLL_SECONDS = 15;
@@ -68,7 +69,14 @@ export class NotesMenuView {
       label: 'Notes',
       can_focus: true,
       reactive: true,
+      visible: false,
       style_class: 'button transnote-view-button',
+    });
+    this._searchEntry = new St.Entry({
+      hint_text: 'Search notes…',
+      can_focus: true,
+      x_expand: true,
+      style_class: 'transnote-entry transnote-search-entry',
     });
     this._newNoteButton = new St.Button({
       label: 'New note',
@@ -84,6 +92,10 @@ export class NotesMenuView {
     });
 
     this._notesTab.connect('clicked', () => this._showView('notes'));
+    this._searchEntry.clutter_text.connect(
+      'text-changed',
+      () => this._applyNoteFilter()
+    );
     this._newNoteButton.connect(
       'clicked',
       () => this._setComposerVisible(true)
@@ -91,9 +103,7 @@ export class NotesMenuView {
     this._setupTab.connect('clicked', () => this._showView('setup'));
 
     this._toolbar.add_child(this._notesTab);
-    this._toolbar.add_child(new St.Widget({
-      x_expand: true,
-    }));
+    this._toolbar.add_child(this._searchEntry);
     this._toolbar.add_child(this._newNoteButton);
     this._toolbar.add_child(this._setupTab);
     this._notesTab.add_style_class_name('transnote-tab-active');
@@ -604,7 +614,10 @@ export class NotesMenuView {
     const setup = name === 'setup';
     this._notesView.visible = !setup;
     this._setupScrollView.visible = setup;
+    this._notesTab.visible = setup;
+    this._searchEntry.visible = !setup;
     this._newNoteButton.visible = !setup;
+    this._setupTab.visible = !setup;
 
     this._notesTab.remove_style_class_name('transnote-tab-active');
     this._setupTab.remove_style_class_name('transnote-tab-active');
@@ -687,11 +700,18 @@ export class NotesMenuView {
         this._commentFocusedNoteId === '' &&
         this._commentSubmitNoteId === ''
       ) {
-        this._renderNotes(notes, attachmentStates);
+        this._applyNoteFilter();
+      } else {
+        const query = this._searchEntry.get_text();
+        const filteredNotes = filterNotes(notes, query);
+        this._updateNoteStatus(
+          filteredNotes.length,
+          notes.length,
+          query
+        );
       }
 
       this._updateDiagnostics(this._diagnosticState);
-      this._status.text = `${notes.length} note${notes.length === 1 ? '' : 's'}`;
     } catch (error) {
       if (!this._destroyed && !this._cancellable.is_cancelled())
         this._status.text = `Error: ${error.message}`;
@@ -705,21 +725,65 @@ export class NotesMenuView {
     }
   }
 
-  _renderNotes(notes, attachmentStates = {}) {
+  _applyNoteFilter() {
+    if (this._destroyed || !this._notesBox)
+      return;
+
+    const query = this._searchEntry?.get_text() ?? '';
+    const filteredNotes = filterNotes(this._lastNotes, query);
+    const hasQuery = query.trim() !== '';
+    const emptyMessage =
+      hasQuery && this._lastNotes.length > 0
+        ? 'No matching notes.'
+        : 'No notes yet.';
+
+    this._renderNotes(
+      filteredNotes,
+      this._lastAttachmentStates,
+      emptyMessage
+    );
+    this._updateNoteStatus(
+      filteredNotes.length,
+      this._lastNotes.length,
+      query
+    );
+  }
+
+  _updateNoteStatus(matchedCount, totalCount, query) {
+    const matched = Number.isInteger(matchedCount)
+      ? matchedCount
+      : 0;
+    const total = Number.isInteger(totalCount)
+      ? totalCount
+      : 0;
+
+    if (String(query ?? '').trim() !== '') {
+      this._status.text =
+        `${matched} of ${total} note${total === 1 ? '' : 's'}`;
+      return;
+    }
+
+    this._status.text =
+      `${total} note${total === 1 ? '' : 's'}`;
+  }
+
+  _renderNotes(notes, attachmentStates = {}, emptyMessage = 'No notes yet.') {
     for (const child of this._notesBox.get_children())
       child.destroy();
 
     if (notes.length === 0) {
-      this._expandedNoteId = '';
+      if (this._lastNotes.length === 0)
+        this._expandedNoteId = '';
+
       this._notesBox.add_child(new St.Label({
-        text: 'No notes yet.',
+        text: String(emptyMessage || 'No notes yet.'),
         style_class: 'transnote-empty',
       }));
       return;
     }
 
     const noteIds = new Set(
-      notes.map(note => String(note?.id ?? '').trim())
+      this._lastNotes.map(note => String(note?.id ?? '').trim())
     );
     if (!noteIds.has(this._expandedNoteId))
       this._expandedNoteId = '';
@@ -1127,10 +1191,7 @@ export class NotesMenuView {
         ? ''
         : id;
 
-    this._renderNotes(
-      this._lastNotes,
-      this._lastAttachmentStates
-    );
+    this._applyNoteFilter();
   }
 
   _openRepository() {

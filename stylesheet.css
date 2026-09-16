@@ -15,6 +15,10 @@
   margin-bottom: 2px;
 }
 
+.transnote-entry.transnote-search-entry {
+  margin-top: 0;
+}
+
 .transnote-view-button {
   min-width: 112px;
   padding: 7px 14px;

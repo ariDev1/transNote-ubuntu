@@ -42,3 +42,24 @@ export function compactNoteSummary({comments, attachments} = {}) {
 
   return parts.join(' · ');
 }
+
+
+export function filterNotes(notes, query) {
+  const list = Array.isArray(notes) ? notes : [];
+  const needle = String(query ?? '').trim().toLowerCase();
+
+  if (needle === '')
+    return list.slice();
+
+  return list.filter(note => {
+    const fields = [
+      note?.title,
+      note?.body,
+      note?.author,
+    ];
+
+    return fields.some(value =>
+      String(value ?? '').toLowerCase().includes(needle)
+    );
+  });
+}

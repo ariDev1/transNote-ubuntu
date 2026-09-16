@@ -2,8 +2,8 @@
   "uuid": "transnote@aridev1",
   "name": "TransNote",
   "description": "Shared text notes for GNOME Shell",
-  "version": 6,
-  "version-name": "0.5.1",
+  "version": 7,
+  "version-name": "0.6.0",
   "shell-version": [
     "46",
     "50"

@@ -39,26 +39,26 @@ REQUIRED_RUNTIME_FILES = (
 )
 
 
-class Version5BaselineTests(unittest.TestCase):
-    def test_metadata_identifies_release_version_6(self):
+class Version6BaselineTests(unittest.TestCase):
+    def test_metadata_identifies_release_version_7(self):
         metadata = json.loads((ROOT / "metadata.json").read_text())
 
         self.assertEqual(metadata["uuid"], "transnote@aridev1")
-        self.assertEqual(metadata["version"], 6)
-        self.assertEqual(metadata["version-name"], "0.5.1")
+        self.assertEqual(metadata["version"], 7)
+        self.assertEqual(metadata["version-name"], "0.6.0")
         self.assertEqual(metadata["shell-version"], ["46", "50"])
         self.assertEqual(
             metadata["url"],
             "https://github.com/ariDev1/transNote-ubuntu",
         )
 
-    def test_readme_identifies_release_version_6(self):
+    def test_readme_identifies_release_version_7(self):
         readme = (ROOT / "README.md").read_text()
 
         for text in (
-            "- TransNote 0.5.1",
-            "- Extension version: `6`",
-            "- Footer build information: `0.5.1 · <revision> · GitHub`",
+            "- TransNote 0.6.0",
+            "- Extension version: `7`",
+            "- Footer build information: `0.6.0 · <revision> · GitHub`",
         ):
             self.assertIn(text, readme)
 

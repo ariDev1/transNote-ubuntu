@@ -10,11 +10,11 @@ The Ubuntu port keeps the existing TransNote note model and compatible folder-sy
 
 ## Current release
 
-- TransNote 0.5.1
+- TransNote 0.6.0
 - GNOME Shell 46 and 50
 - Extension UUID: `transnote@aridev1`
-- Extension version: `6`
-- Footer build information: `0.5.1 · <revision> · GitHub`
+- Extension version: `7`
+- Footer build information: `0.6.0 · <revision> · GitHub`
 - Ubuntu ↔ Ubuntu device sync supported
 - Ubuntu ↔ Omarchy folder sync supported
 
@@ -26,7 +26,9 @@ The Ubuntu port keeps the existing TransNote note model and compatible folder-sy
 - Comments
 - Attachments
 - Note background colors
-- Red unread indicator for new peer notes
+- Compact expandable note cards
+- Contextual note search by title, body, and author
+- Red unread indicator for new peer notes and comments
 - Automatic peer polling
 - Compatible folder synchronization
 - Deletion and unshare tombstones prevent stale shared notes from reappearing

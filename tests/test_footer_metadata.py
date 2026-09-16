@@ -10,8 +10,28 @@ class FooterMetadataTests(unittest.TestCase):
     def test_metadata_separates_gnome_and_product_versions(self):
         metadata = json.loads((ROOT / "metadata.json").read_text())
 
-        self.assertEqual(metadata["version"], 6)
-        self.assertEqual(metadata["version-name"], "0.5.1")
+        self.assertEqual(metadata["version"], 7)
+        self.assertEqual(metadata["version-name"], "0.6.0")
+
+    def test_readme_reports_current_release(self):
+        source = (ROOT / "README.md").read_text()
+
+        self.assertIn("- TransNote 0.6.0", source)
+        self.assertIn("- Extension version: `7`", source)
+        self.assertIn(
+            "- Footer build information: `0.6.0 · <revision> · GitHub`",
+            source,
+        )
+        self.assertIn("- Compact expandable note cards", source)
+        self.assertIn(
+            "- Contextual note search by title, body, and author",
+            source,
+        )
+        self.assertIn(
+            "- Red unread indicator for new peer notes and comments",
+            source,
+        )
+
 
     def test_extension_passes_metadata_to_indicator(self):
         source = (ROOT / "extension.js").read_text()

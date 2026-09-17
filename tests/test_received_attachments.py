@@ -136,5 +136,118 @@ console.log(JSON.stringify(result));
             self.assertEqual(result["state"], "waiting")
 
 
+    def test_invalid_when_attachment_root_is_symlink(self):
+        import hashlib
+
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            sync_dir = base / "sync"
+            outside = base / "outside"
+            sync_dir.mkdir()
+            outside.mkdir()
+
+            data = b"outside bytes\n"
+            sha = hashlib.sha256(data).hexdigest()
+
+            outside_path = (
+                outside
+                / "note-1"
+                / "att-1-file.txt"
+            )
+            outside_path.parent.mkdir()
+            outside_path.write_bytes(data)
+
+            (sync_dir / ".attachments").symlink_to(
+                outside,
+                target_is_directory=True,
+            )
+
+            result = self.inspect(
+                sync_dir,
+                "note-1",
+                {
+                    "id": "att-1",
+                    "name": "file.txt",
+                    "size": len(data),
+                    "sha256": sha,
+                },
+            )
+
+            self.assertEqual(result["state"], "invalid")
+            self.assertEqual(outside_path.read_bytes(), data)
+
+    def test_invalid_when_attachment_note_directory_is_symlink(self):
+        import hashlib
+
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            sync_dir = base / "sync"
+            attachment_root = sync_dir / ".attachments"
+            outside = base / "outside-note"
+
+            attachment_root.mkdir(parents=True)
+            outside.mkdir()
+
+            data = b"outside bytes\n"
+            sha = hashlib.sha256(data).hexdigest()
+
+            outside_path = outside / "att-1-file.txt"
+            outside_path.write_bytes(data)
+
+            (attachment_root / "note-1").symlink_to(
+                outside,
+                target_is_directory=True,
+            )
+
+            result = self.inspect(
+                sync_dir,
+                "note-1",
+                {
+                    "id": "att-1",
+                    "name": "file.txt",
+                    "size": len(data),
+                    "sha256": sha,
+                },
+            )
+
+            self.assertEqual(result["state"], "invalid")
+            self.assertEqual(outside_path.read_bytes(), data)
+
+    def test_invalid_when_attachment_file_is_symlink(self):
+        import hashlib
+
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            sync_dir = base / "sync"
+            note_dir = (
+                sync_dir
+                / ".attachments"
+                / "note-1"
+            )
+            note_dir.mkdir(parents=True)
+
+            outside_path = base / "outside.txt"
+            data = b"outside bytes\n"
+            outside_path.write_bytes(data)
+
+            (note_dir / "att-1-file.txt").symlink_to(
+                outside_path
+            )
+
+            result = self.inspect(
+                sync_dir,
+                "note-1",
+                {
+                    "id": "att-1",
+                    "name": "file.txt",
+                    "size": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                },
+            )
+
+            self.assertEqual(result["state"], "invalid")
+            self.assertEqual(outside_path.read_bytes(), data)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -15,7 +15,9 @@ import {
 import {
   inspectReceivedAttachment,
   inspectStoredAttachment,
+  materializeVerifiedReceivedAttachment,
   mirrorAttachment,
+  pruneVerifiedReceivedAttachments,
   mirrorSharedAttachments,
   removeAttachmentNoteDirectory,
   resolveAttachmentPath,
@@ -158,6 +160,14 @@ async function notesList(dataDir, config) {
   const peerNotes = livePeerNotes.filter(
     note => !isDeleted(deletedIds, note.id)
   );
+
+  if (config.configured) {
+    await pruneVerifiedReceivedAttachments({
+      dataDir,
+      notes: peerNotes,
+    });
+  }
+
   const hiddenIds = new Set(sanitizeHidden(state.hiddenIds));
   const visiblePeerNotes = peerNotes.filter(
     note => !hiddenIds.has(note.id)
@@ -688,10 +698,12 @@ async function resolveAttachmentActionTarget(
     );
   }
 
-  const inspected = await inspectReceivedAttachment({
+  const inspected = await materializeVerifiedReceivedAttachment({
+    dataDir,
     syncDir: config.syncDir,
     noteId: cleanNoteId,
     attachment,
+    validAttachments: peerNote.attachments,
   });
 
   if (inspected.state !== 'verified') {

@@ -171,7 +171,7 @@ class AttachmentActionTests(unittest.TestCase):
             self.assertTrue(opener_log.exists())
             self.assertTrue(
                 opener_log.read_text().endswith(
-                    "/.attachments/peer-note/peer-att-peer.txt"
+                    "/verified-attachments/peer-note/peer-att-peer.txt"
                 )
             )
 

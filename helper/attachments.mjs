@@ -7,6 +7,7 @@ import {
   mkdir,
   open,
   readFile,
+  readdir,
   rename,
   rm,
   stat,
@@ -165,6 +166,9 @@ async function verifyOpenAttachment(handle) {
   const before = await handle.stat();
   const size = Number(before.size);
 
+  if (!before.isFile())
+    throw invalidAttachment('attachment is not a regular file');
+
   if (
     !Number.isSafeInteger(size) ||
     size < 0 ||
@@ -196,6 +200,7 @@ async function verifyOpenAttachment(handle) {
     throw invalidAttachment('mirrored attachment changed during verification');
 
   return {
+    bytes,
     size,
     sha256: createHash('sha256')
       .update(bytes)
@@ -413,29 +418,235 @@ export async function removeAttachmentNoteDirectory({
   }
 }
 
-export async function inspectReceivedAttachment({
+async function readReceivedAttachmentBytes({
   syncDir,
   noteId,
   attachment,
 }) {
   const root = join(String(syncDir ?? ''), '.attachments');
-
-  try {
-    await stat(root);
-  } catch (error) {
-    if (error.code === 'ENOENT')
-      return {state: 'waiting'};
-    throw error;
-  }
-
   const clean = Store.sanitizeAttachment(attachment);
 
   if (!clean)
     return {state: 'invalid'};
 
+  let note;
+  let attachmentId;
+  let name;
   let path;
+
   try {
+    note = requirePathComponent(noteId);
+    attachmentId = requirePathComponent(clean.id);
+    name = requirePathComponent(clean.name);
+
     path = resolveAttachmentPath(
+      root,
+      note,
+      attachmentId,
+      name
+    );
+  } catch {
+    return {state: 'invalid'};
+  }
+
+  const targetName = `${attachmentId}-${name}`;
+
+  let rootHandle;
+  let noteHandle;
+  let fileHandle;
+
+  try {
+    try {
+      rootHandle = await openNoFollowDirectory(root);
+    } catch (error) {
+      if (error.code === 'ENOENT')
+        return {state: 'waiting'};
+
+      if (error.code === 'UNSAFE_ATTACHMENT_PATH')
+        return {state: 'invalid'};
+
+      throw error;
+    }
+
+    const notePath =
+      `/proc/self/fd/${rootHandle.fd}/${note}`;
+
+    try {
+      noteHandle = await openNoFollowDirectory(notePath);
+    } catch (error) {
+      if (error.code === 'ENOENT')
+        return {state: 'missing'};
+
+      if (error.code === 'UNSAFE_ATTACHMENT_PATH')
+        return {state: 'invalid', path};
+
+      throw error;
+    }
+
+    const sourcePath =
+      `/proc/self/fd/${noteHandle.fd}/${targetName}`;
+
+    try {
+      fileHandle = await open(
+        sourcePath,
+        fsConstants.O_RDONLY |
+          fsConstants.O_NOFOLLOW
+      );
+    } catch (error) {
+      if (error.code === 'ENOENT')
+        return {state: 'missing'};
+
+      if (error.code === 'ELOOP' || error.code === 'ENOTDIR')
+        return {state: 'invalid', path};
+
+      throw error;
+    }
+
+    let verified;
+
+    try {
+      verified = await verifyOpenAttachment(fileHandle);
+    } catch (error) {
+      if (error.code === 'ATTACHMENT_INVALID')
+        return {state: 'invalid', path};
+
+      throw error;
+    }
+
+    if (
+      verified.size !== clean.size ||
+      verified.sha256 !== clean.sha256
+    ) {
+      return {
+        state: 'invalid',
+        path,
+      };
+    }
+
+    return {
+      state: 'verified',
+      path,
+      bytes: verified.bytes,
+    };
+  } finally {
+    if (fileHandle)
+      await fileHandle.close();
+
+    if (noteHandle)
+      await noteHandle.close();
+
+    if (rootHandle)
+      await rootHandle.close();
+  }
+}
+
+function trustedAttachmentNames(attachments) {
+  const names = new Set();
+
+  for (
+    const value of Array.isArray(attachments)
+      ? attachments
+      : []
+  ) {
+    const clean = Store.sanitizeAttachment(value);
+
+    if (!clean)
+      continue;
+
+    try {
+      const attachmentId = requirePathComponent(clean.id);
+      const name = requirePathComponent(clean.name);
+
+      names.add(`${attachmentId}-${name}`);
+    } catch {
+      continue;
+    }
+  }
+
+  return names;
+}
+
+async function pruneTrustedAttachmentDirectory({
+  noteDir,
+  validAttachments,
+}) {
+  if (!Array.isArray(validAttachments))
+    return;
+
+  const expected = trustedAttachmentNames(validAttachments);
+
+  let names;
+
+  try {
+    names = await readdir(noteDir);
+  } catch (error) {
+    if (error.code === 'ENOENT')
+      return;
+
+    throw error;
+  }
+
+  for (const name of names) {
+    if (expected.has(name))
+      continue;
+
+    await rm(join(noteDir, name), {
+      recursive: true,
+      force: true,
+    });
+  }
+}
+
+export async function inspectReceivedAttachment({
+  syncDir,
+  noteId,
+  attachment,
+}) {
+  const result = await readReceivedAttachmentBytes({
+    syncDir,
+    noteId,
+    attachment,
+  });
+
+  if (result.state !== 'verified')
+    return result;
+
+  return {
+    state: 'verified',
+    path: result.path,
+  };
+}
+
+export async function materializeVerifiedReceivedAttachment({
+  dataDir,
+  syncDir,
+  noteId,
+  attachment,
+  validAttachments = null,
+}) {
+  const clean = Store.sanitizeAttachment(attachment);
+
+  if (!clean)
+    return {state: 'invalid'};
+
+  const received = await readReceivedAttachmentBytes({
+    syncDir,
+    noteId,
+    attachment: clean,
+  });
+
+  if (received.state !== 'verified')
+    return received;
+
+  const root = join(
+    String(dataDir ?? ''),
+    'verified-attachments'
+  );
+
+  let target;
+
+  try {
+    target = resolveAttachmentPath(
       root,
       noteId,
       clean.id,
@@ -445,50 +656,138 @@ export async function inspectReceivedAttachment({
     return {state: 'invalid'};
   }
 
-  let staged;
+  const noteDir = dirname(target);
+
+  await mkdir(noteDir, {
+    recursive: true,
+    mode: 0o700,
+  });
+
+  await pruneTrustedAttachmentDirectory({
+    noteDir,
+    validAttachments,
+  });
+
+  const existing = await inspectStoredAttachment({
+    path: target,
+    attachment: clean,
+  });
+
+  if (existing.state === 'verified')
+    return existing;
+
+  const tempPath =
+    `${target}.tmp-${process.pid}-${Date.now()}`;
+
+  let tempHandle;
+
   try {
-    staged = await stat(path);
+    tempHandle = await open(
+      tempPath,
+      fsConstants.O_RDWR |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        fsConstants.O_NOFOLLOW,
+      0o600
+    );
+
+    await tempHandle.writeFile(received.bytes);
+    await tempHandle.chmod(0o600);
+
+    const verified = await verifyOpenAttachment(tempHandle);
+
+    if (
+      verified.size !== clean.size ||
+      verified.sha256 !== clean.sha256
+    ) {
+      throw invalidAttachment(
+        'trusted attachment bytes do not match metadata'
+      );
+    }
+
+    await tempHandle.close();
+    tempHandle = null;
+
+    await rename(tempPath, target);
+
+    return {
+      state: 'verified',
+      path: target,
+    };
+  } finally {
+    if (tempHandle)
+      await tempHandle.close();
+
+    await rm(tempPath, {force: true});
+  }
+}
+
+export async function pruneVerifiedReceivedAttachments({
+  dataDir,
+  notes,
+}) {
+  const root = join(
+    String(dataDir ?? ''),
+    'verified-attachments'
+  );
+
+  const expected = new Map();
+
+  for (const value of Array.isArray(notes) ? notes : []) {
+    const clean = Store.sanitizeNote(value);
+
+    if (!clean)
+      continue;
+
+    let noteId;
+
+    try {
+      noteId = requirePathComponent(clean.id);
+    } catch {
+      continue;
+    }
+
+    expected.set(
+      noteId,
+      Array.isArray(clean.attachments)
+        ? clean.attachments
+        : []
+    );
+  }
+
+  let entries;
+
+  try {
+    entries = await readdir(root, {
+      withFileTypes: true,
+    });
   } catch (error) {
     if (error.code === 'ENOENT')
-      return {state: 'missing'};
+      return;
+
     throw error;
   }
 
-  if (
-    staged.size < 0 ||
-    staged.size > Store.MAX_ATTACHMENT_BYTES ||
-    staged.size !== clean.size
-  ) {
-    return {
-      state: 'invalid',
-      path,
-    };
+  for (const entry of entries) {
+    const noteDir = join(root, entry.name);
+    const validAttachments = expected.get(entry.name);
+
+    if (
+      validAttachments === undefined ||
+      !entry.isDirectory()
+    ) {
+      await rm(noteDir, {
+        recursive: true,
+        force: true,
+      });
+      continue;
+    }
+
+    await pruneTrustedAttachmentDirectory({
+      noteDir,
+      validAttachments,
+    });
   }
-
-  const bytes = await readFile(path);
-
-  if (bytes.length !== clean.size) {
-    return {
-      state: 'invalid',
-      path,
-    };
-  }
-
-  const sha256 = createHash('sha256')
-    .update(bytes)
-    .digest('hex');
-
-  if (sha256 !== clean.sha256) {
-    return {
-      state: 'invalid',
-      path,
-    };
-  }
-
-  return {
-    state: 'verified',
-    path,
-  };
 }
 
 export async function inspectStoredAttachment({

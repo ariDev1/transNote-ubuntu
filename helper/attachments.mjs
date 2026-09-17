@@ -5,6 +5,7 @@ import {
   chmod,
   copyFile,
   mkdir,
+  open,
   readFile,
   rm,
   stat,
@@ -232,12 +233,36 @@ export async function removeAttachmentNoteDirectory({
 }) {
   const root = resolve(String(attachmentRoot ?? ''));
   const note = requirePathComponent(noteId);
-  const directory = resolve(root, note);
 
-  await rm(directory, {
-    recursive: true,
-    force: true,
-  });
+  let rootHandle;
+
+  try {
+    rootHandle = await open(
+      root,
+      fsConstants.O_RDONLY |
+        fsConstants.O_DIRECTORY |
+        fsConstants.O_NOFOLLOW
+    );
+  } catch (error) {
+    if (error.code === 'ENOENT')
+      return;
+
+    if (error.code === 'ELOOP' || error.code === 'ENOTDIR')
+      throw unsafePath();
+
+    throw error;
+  }
+
+  try {
+    const directory = `/proc/self/fd/${rootHandle.fd}/${note}`;
+
+    await rm(directory, {
+      recursive: true,
+      force: true,
+    });
+  } finally {
+    await rootHandle.close();
+  }
 }
 
 export async function inspectReceivedAttachment({

@@ -7,6 +7,7 @@ import {
   mkdir,
   open,
   readFile,
+  rename,
   rm,
   stat,
 } from 'node:fs/promises';
@@ -144,6 +145,161 @@ function invalidAttachment(message = 'attachment metadata or bytes are invalid')
   return error;
 }
 
+async function openNoFollowDirectory(path) {
+  try {
+    return await open(
+      path,
+      fsConstants.O_RDONLY |
+        fsConstants.O_DIRECTORY |
+        fsConstants.O_NOFOLLOW
+    );
+  } catch (error) {
+    if (error.code === 'ELOOP' || error.code === 'ENOTDIR')
+      throw unsafePath();
+
+    throw error;
+  }
+}
+
+async function verifyOpenAttachment(handle) {
+  const before = await handle.stat();
+  const size = Number(before.size);
+
+  if (
+    !Number.isSafeInteger(size) ||
+    size < 0 ||
+    size > Store.MAX_ATTACHMENT_BYTES
+  ) {
+    throw invalidAttachment('mirrored attachment size is invalid');
+  }
+
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+
+  while (offset < size) {
+    const result = await handle.read(
+      bytes,
+      offset,
+      size - offset,
+      offset
+    );
+
+    if (result.bytesRead === 0)
+      throw invalidAttachment('mirrored attachment changed during verification');
+
+    offset += result.bytesRead;
+  }
+
+  const after = await handle.stat();
+
+  if (after.size !== size)
+    throw invalidAttachment('mirrored attachment changed during verification');
+
+  return {
+    size,
+    sha256: createHash('sha256')
+      .update(bytes)
+      .digest('hex'),
+  };
+}
+
+async function writeMirroredAttachment({
+  syncDir,
+  noteId,
+  attachment,
+  bytes,
+}) {
+  const root = join(String(syncDir ?? ''), '.attachments');
+  const note = requirePathComponent(noteId);
+  const attachmentId = requirePathComponent(attachment.id);
+  const name = requirePathComponent(attachment.name);
+  const targetName = `${attachmentId}-${name}`;
+
+  await mkdir(root, {
+    recursive: true,
+    mode: 0o700,
+  });
+
+  let rootHandle;
+  let noteHandle;
+  let tempHandle;
+  let tempPath = '';
+
+  try {
+    rootHandle = await openNoFollowDirectory(root);
+
+    const notePath = `/proc/self/fd/${rootHandle.fd}/${note}`;
+
+    try {
+      await mkdir(notePath, {
+        mode: 0o700,
+      });
+    } catch (error) {
+      if (error.code !== 'EEXIST')
+        throw error;
+    }
+
+    noteHandle = await openNoFollowDirectory(notePath);
+
+    const targetPath =
+      `/proc/self/fd/${noteHandle.fd}/${targetName}`;
+
+    const tempName =
+      `.${targetName}.tmp-${process.pid}-${Date.now()}`;
+
+    tempPath =
+      `/proc/self/fd/${noteHandle.fd}/${tempName}`;
+
+    tempHandle = await open(
+      tempPath,
+      fsConstants.O_RDWR |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        fsConstants.O_NOFOLLOW,
+      0o600
+    );
+
+    await tempHandle.writeFile(bytes);
+    await tempHandle.chmod(0o600);
+
+    const verified = await verifyOpenAttachment(tempHandle);
+
+    if (
+      verified.size !== attachment.size ||
+      verified.sha256 !== attachment.sha256
+    ) {
+      throw invalidAttachment(
+        'mirrored attachment bytes do not match metadata'
+      );
+    }
+
+    await tempHandle.close();
+    tempHandle = null;
+
+    await rename(tempPath, targetPath);
+    tempPath = '';
+
+    return resolveAttachmentPath(
+      root,
+      note,
+      attachmentId,
+      name
+    );
+  } finally {
+    if (tempHandle)
+      await tempHandle.close();
+
+    if (tempPath)
+      await rm(tempPath, {force: true});
+
+    if (noteHandle)
+      await noteHandle.close();
+
+    if (rootHandle)
+      await rootHandle.close();
+  }
+}
+
 export async function mirrorAttachment({
   dataDir,
   syncDir,
@@ -173,34 +329,26 @@ export async function mirrorAttachment({
     );
   }
 
-  const target = resolveAttachmentPath(
-    join(syncDir, '.attachments'),
-    noteId,
-    clean.id,
-    clean.name
-  );
-
-  await mkdir(dirname(target), {
-    recursive: true,
-    mode: 0o700,
-  });
-
-  await copyFile(source, target);
-  await chmod(target, 0o600);
-
-  const targetVerified = await verifyStagedAttachment(target);
+  const sourceBytes = await readFile(source);
+  const sourceBytesHash = createHash('sha256')
+    .update(sourceBytes)
+    .digest('hex');
 
   if (
-    targetVerified.size !== clean.size ||
-    targetVerified.sha256 !== clean.sha256
+    sourceBytes.length !== clean.size ||
+    sourceBytesHash !== clean.sha256
   ) {
-    await rm(target, {force: true});
     throw invalidAttachment(
-      'mirrored attachment bytes do not match metadata'
+      'private attachment bytes changed during mirror'
     );
   }
 
-  return target;
+  return writeMirroredAttachment({
+    syncDir,
+    noteId,
+    attachment: clean,
+    bytes: sourceBytes,
+  });
 }
 
 export async function mirrorSharedAttachments({

@@ -57,6 +57,7 @@ function emptyState() {
     notes: [],
     outbox: [],
     deletedIds: {},
+    peerDeletedIds: {},
     hiddenIds: [],
   };
 }
@@ -78,6 +79,7 @@ function sanitizeState(parsed) {
     notes,
     outbox: Store.sanitizeOutbox(parsed?.outbox),
     deletedIds: sanitizeDeleted(parsed?.deletedIds ?? parsed?.deleted),
+    peerDeletedIds: sanitizeDeleted(parsed?.peerDeletedIds),
     hiddenIds: sanitizeHidden(parsed?.hiddenIds ?? parsed?.hidden),
   };
 }

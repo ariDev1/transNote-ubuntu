@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -206,7 +207,7 @@ class TombstoneSyncTests(unittest.TestCase):
                 {item["id"] for item in snapshot["notes"]},
             )
 
-    def test_peer_tombstone_hides_stale_note_and_is_persisted(self):
+    def test_peer_tombstone_hides_stale_note_and_is_persisted_as_peer_state(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             data_dir = root / "data"
@@ -232,7 +233,11 @@ class TombstoneSyncTests(unittest.TestCase):
             self.assertNotIn("peer-note", ids)
 
             state = json.loads((data_dir / "notes.json").read_text())
-            self.assertEqual(state["deletedIds"]["peer-note"], deleted_at)
+            self.assertNotIn("peer-note", state["deletedIds"])
+            self.assertEqual(
+                state["peerDeletedIds"]["peer-note"],
+                deleted_at,
+            )
 
     def test_persisted_tombstone_blocks_later_stale_version1_snapshot(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -310,7 +315,7 @@ class TombstoneSyncTests(unittest.TestCase):
             self.assertIn("peer-note", ids)
 
             state = json.loads((data_dir / "notes.json").read_text())
-            self.assertNotIn("peer-note", state["deletedIds"])
+            self.assertNotIn("peer-note", state["peerDeletedIds"])
 
     def test_peer_tombstone_prunes_local_comment_outbox(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -348,6 +353,385 @@ class TombstoneSyncTests(unittest.TestCase):
 
             state = json.loads((data_dir / "notes.json").read_text())
             self.assertEqual(state["outbox"], [])
+
+
+    def test_peer_tombstone_cannot_enter_local_authority(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data_dir = root / "data"
+            sync_dir = root / "sync"
+            sync_dir.mkdir()
+
+            note = self.create_local_note(data_dir, sync_dir)
+            self.set_shared(
+                data_dir,
+                sync_dir,
+                note["id"],
+                True,
+            )
+
+            write_peer_snapshot(
+                sync_dir,
+                version=2,
+                notes=[],
+                deleted_ids={
+                    note["id"]:
+                        "2026-09-17T12:00:00.000Z",
+                },
+            )
+
+            listed = run_helper(
+                "notes-list",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+            )
+
+            self.assertEqual(
+                listed.returncode,
+                0,
+                msg=listed.stderr,
+            )
+
+            ids = {
+                item["id"]
+                for item in result_json(listed)["notes"]
+            }
+
+            self.assertIn(note["id"], ids)
+
+            state = json.loads(
+                (data_dir / "notes.json").read_text()
+            )
+
+            self.assertNotIn(
+                note["id"],
+                state["deletedIds"],
+                "peer tombstone entered local authority",
+            )
+
+    def test_peer_tombstone_is_not_republished_by_local_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data_dir = root / "data"
+            sync_dir = root / "sync"
+            sync_dir.mkdir()
+
+            note = self.create_local_note(data_dir, sync_dir)
+            self.set_shared(
+                data_dir,
+                sync_dir,
+                note["id"],
+                True,
+            )
+
+            write_peer_snapshot(
+                sync_dir,
+                version=2,
+                notes=[],
+                deleted_ids={
+                    note["id"]:
+                        "2026-09-17T12:00:00.000Z",
+                },
+            )
+
+            listed = run_helper(
+                "notes-list",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+            )
+            self.assertEqual(
+                listed.returncode,
+                0,
+                msg=listed.stderr,
+            )
+
+            synced = run_helper(
+                "sync-now",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+            )
+            self.assertEqual(
+                synced.returncode,
+                0,
+                msg=synced.stderr,
+            )
+
+            snapshot = json.loads(
+                (sync_dir / "desktop.json").read_text()
+            )
+
+            self.assertNotIn(
+                note["id"],
+                snapshot["deletedIds"],
+                "peer tombstone was republished",
+            )
+
+            self.assertIn(
+                note["id"],
+                {
+                    item["id"]
+                    for item in snapshot["notes"]
+                },
+            )
+
+
+    def test_peer_tombstone_persists_only_in_non_authoritative_state(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data_dir = root / "data"
+            sync_dir = root / "sync"
+            sync_dir.mkdir()
+
+            deleted_at = "2026-09-17T12:30:00.000Z"
+
+            write_peer_snapshot(
+                sync_dir,
+                version=2,
+                notes=[
+                    peer_note(
+                        "2026-09-17T12:00:00.000Z"
+                    )
+                ],
+                deleted_ids={
+                    "peer-note": deleted_at,
+                },
+            )
+
+            first = run_helper(
+                "notes-list",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+            )
+
+            self.assertEqual(
+                first.returncode,
+                0,
+                msg=first.stderr,
+            )
+
+            state = json.loads(
+                (data_dir / "notes.json").read_text()
+            )
+
+            self.assertNotIn(
+                "peer-note",
+                state["deletedIds"],
+            )
+
+            self.assertEqual(
+                state["peerDeletedIds"]["peer-note"],
+                deleted_at,
+            )
+
+            write_peer_snapshot(
+                sync_dir,
+                version=1,
+                notes=[
+                    peer_note(
+                        "2026-09-17T12:00:00.000Z"
+                    )
+                ],
+            )
+
+            second = run_helper(
+                "notes-list",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+            )
+
+            self.assertEqual(
+                second.returncode,
+                0,
+                msg=second.stderr,
+            )
+
+            ids = {
+                note["id"]
+                for note in result_json(second)["notes"]
+            }
+
+            self.assertNotIn(
+                "peer-note",
+                ids,
+                "remembered peer tombstone did not suppress stale peer note",
+            )
+
+
+    def test_comment_add_does_not_import_unrelated_peer_tombstone(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data_dir = root / "data"
+            sync_dir = root / "sync"
+            sync_dir.mkdir()
+
+            write_peer_snapshot(
+                sync_dir,
+                version=2,
+                notes=[peer_note()],
+                deleted_ids={
+                    "other-peer-note":
+                        "2026-09-17T12:30:00.000Z",
+                },
+            )
+
+            added = run_helper(
+                "comment-add",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+                input_value={
+                    "noteId": "peer-note",
+                    "text": "reply",
+                },
+            )
+
+            self.assertEqual(
+                added.returncode,
+                0,
+                msg=added.stderr,
+            )
+
+            state = json.loads(
+                (data_dir / "notes.json").read_text()
+            )
+
+            self.assertNotIn(
+                "other-peer-note",
+                state["deletedIds"],
+            )
+            self.assertIn(
+                "other-peer-note",
+                state["peerDeletedIds"],
+            )
+
+    def test_note_hide_does_not_import_unrelated_peer_tombstone(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data_dir = root / "data"
+            sync_dir = root / "sync"
+            sync_dir.mkdir()
+
+            write_peer_snapshot(
+                sync_dir,
+                version=2,
+                notes=[peer_note()],
+                deleted_ids={
+                    "other-peer-note":
+                        "2026-09-17T12:30:00.000Z",
+                },
+            )
+
+            hidden = run_helper(
+                "note-hide",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+                input_value={
+                    "id": "peer-note",
+                },
+            )
+
+            self.assertEqual(
+                hidden.returncode,
+                0,
+                msg=hidden.stderr,
+            )
+
+            state = json.loads(
+                (data_dir / "notes.json").read_text()
+            )
+
+            self.assertNotIn(
+                "other-peer-note",
+                state["deletedIds"],
+            )
+            self.assertIn(
+                "other-peer-note",
+                state["peerDeletedIds"],
+            )
+
+    def test_attachment_action_honors_remembered_peer_tombstone(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data_dir = root / "data"
+            sync_dir = root / "sync"
+            sync_dir.mkdir()
+
+            payload = b"stale attachment\n"
+
+            note = peer_note(
+                "2026-09-17T12:00:00.000Z"
+            )
+            note["attachments"] = [{
+                "id": "peer-att",
+                "name": "peer.txt",
+                "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }]
+
+            write_peer_snapshot(
+                sync_dir,
+                version=2,
+                notes=[note],
+                deleted_ids={
+                    "peer-note":
+                        "2026-09-17T12:30:00.000Z",
+                },
+            )
+
+            first = run_helper(
+                "notes-list",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+            )
+
+            self.assertEqual(
+                first.returncode,
+                0,
+                msg=first.stderr,
+            )
+
+            state = json.loads(
+                (data_dir / "notes.json").read_text()
+            )
+
+            self.assertNotIn(
+                "peer-note",
+                state["deletedIds"],
+            )
+            self.assertIn(
+                "peer-note",
+                state["peerDeletedIds"],
+            )
+
+            write_peer_snapshot(
+                sync_dir,
+                version=1,
+                notes=[note],
+            )
+
+            sidecar = (
+                sync_dir
+                / ".attachments"
+                / "peer-note"
+                / "peer-att-peer.txt"
+            )
+            sidecar.parent.mkdir(parents=True)
+            sidecar.write_bytes(payload)
+
+            copied = run_helper(
+                "attachment-copy-text",
+                data_dir=data_dir,
+                sync_dir=sync_dir,
+                input_value={
+                    "noteId": "peer-note",
+                    "attachmentId": "peer-att",
+                },
+            )
+
+            self.assertNotEqual(
+                copied.returncode,
+                0,
+                "stale peer attachment bypassed remembered tombstone",
+            )
 
 
 if __name__ == "__main__":

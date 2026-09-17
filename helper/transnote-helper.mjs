@@ -123,6 +123,27 @@ function emptyDiagnostics(configured = false) {
   };
 }
 
+function reconcilePeerTombstones(state, peers, liveNotes = peers.notes) {
+  const previous = state.peerDeletedIds;
+  const peerDeletedIds = reconcileDeleted(
+    mergeDeleted(previous, peers.deletedIds),
+    liveNotes
+  );
+
+  state.peerDeletedIds = peerDeletedIds;
+
+  return {
+    changed:
+      JSON.stringify(peerDeletedIds) !==
+      JSON.stringify(previous),
+    effectiveDeleted: mergeDeleted(
+      state.deletedIds,
+      peerDeletedIds
+    ),
+  };
+}
+
+
 async function status(dataDir) {
   const state = await loadState(dataDir);
   return {
@@ -153,12 +174,14 @@ async function notesList(dataDir, config) {
   }
 
   const livePeerNotes = peers.notes.filter(note => !mine.has(note.id));
-  const deletedIds = reconcileDeleted(
-    mergeDeleted(state.deletedIds, peers.deletedIds),
-    livePeerNotes
+  const peerDeletion = reconcilePeerTombstones(
+    state,
+    peers,
+    peers.notes
   );
+  const effectiveDeleted = peerDeletion.effectiveDeleted;
   const peerNotes = livePeerNotes.filter(
-    note => !isDeleted(deletedIds, note.id)
+    note => !isDeleted(effectiveDeleted, note.id)
   );
 
   if (config.configured) {
@@ -173,11 +196,9 @@ async function notesList(dataDir, config) {
     note => !hiddenIds.has(note.id)
   );
   const peerPairs = peers.pairs.filter(
-    entry => entry && !isDeleted(deletedIds, entry.noteId)
+    entry => entry && !isDeleted(effectiveDeleted, entry.noteId)
   );
-  let stateChanged =
-    JSON.stringify(deletedIds) !== JSON.stringify(state.deletedIds);
-  state.deletedIds = deletedIds;
+  let stateChanged = peerDeletion.changed;
 
   if (config.configured) {
     const prunedOutbox = Store.pruneOutbox(
@@ -328,13 +349,11 @@ async function commentAdd(dataDir, config) {
       allowList: config.allowList,
     });
 
-    const effectiveDeleted = reconcileDeleted(
-      mergeDeleted(state.deletedIds, peers.deletedIds),
-      peers.notes
+    const peerDeletion = reconcilePeerTombstones(
+      state,
+      peers
     );
-    const deletedChanged =
-      JSON.stringify(effectiveDeleted) !== JSON.stringify(state.deletedIds);
-    state.deletedIds = effectiveDeleted;
+    const effectiveDeleted = peerDeletion.effectiveDeleted;
 
     const peerNote = peers.notes.find(
       note => note &&
@@ -343,7 +362,7 @@ async function commentAdd(dataDir, config) {
     );
 
     if (!peerNote) {
-      if (deletedChanged)
+      if (peerDeletion.changed)
         await saveState(dataDir, state);
       throw helperError(
         'NOTE_NOT_FOUND',
@@ -667,10 +686,14 @@ async function resolveAttachmentActionTarget(
     allowList: config.allowList,
   });
 
-  const effectiveDeleted = reconcileDeleted(
-    mergeDeleted(state.deletedIds, peers.deletedIds),
-    peers.notes
+  const peerDeletion = reconcilePeerTombstones(
+    state,
+    peers
   );
+  const effectiveDeleted = peerDeletion.effectiveDeleted;
+
+  if (peerDeletion.changed)
+    await saveState(dataDir, state);
 
   const peerNote = peers.notes.find(
     note => note &&
@@ -999,17 +1022,17 @@ async function noteHide(dataDir, config) {
     deviceId: config.deviceId,
     allowList: config.allowList,
   });
-  const effectiveDeleted = reconcileDeleted(
-    mergeDeleted(state.deletedIds, peers.deletedIds),
-    peers.notes
+  const peerDeletion = reconcilePeerTombstones(
+    state,
+    peers
   );
+  const effectiveDeleted = peerDeletion.effectiveDeleted;
+
   const peerNote = peers.notes.find(
     note => note &&
       note.id === id &&
       !isDeleted(effectiveDeleted, note.id)
   );
-
-  state.deletedIds = effectiveDeleted;
 
   if (!peerNote) {
     await saveState(dataDir, state);

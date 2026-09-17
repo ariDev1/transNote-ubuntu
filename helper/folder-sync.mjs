@@ -22,6 +22,11 @@ const Store = require('../core/Store.js');
 const MAX_PEER_FILES = 32;
 const MAX_PEER_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_PEER_AGGREGATE_BYTES = 8 * 1024 * 1024;
+const SAFE_SYNC_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+function isSafeSyncId(value) {
+  return SAFE_SYNC_ID_RE.test(Store.normalizeText(value));
+}
 
 function syncError(code, message) {
   const error = new Error(message);
@@ -262,9 +267,17 @@ export async function readPeerSnapshots({
       const parsed = JSON.parse(raw);
       diagnostics.fetched++;
 
+      const peerDeletedIds = sanitizeDeleted(
+        parsed?.deletedIds ?? parsed?.deleted
+      );
+      const safePeerDeletedIds = Object.fromEntries(
+        Object.entries(peerDeletedIds)
+          .filter(([id]) => isSafeSyncId(id))
+      );
+
       deletedIds = mergeDeleted(
         deletedIds,
-        parsed?.deletedIds ?? parsed?.deleted
+        safePeerDeletedIds
       );
 
       const rawNotes = parsed && Array.isArray(parsed.notes)
@@ -273,8 +286,13 @@ export async function readPeerSnapshots({
 
       for (const value of rawNotes) {
         const clean = Store.sanitizeNote(value);
-        if (!clean || clean.shared !== true)
+        if (!clean || !isSafeSyncId(clean.id) || clean.shared !== true)
           continue;
+
+        clean.attachments = clean.attachments.filter(
+          attachment => attachment && isSafeSyncId(attachment.id)
+        );
+
         if (
           clean.author !== config.deviceId &&
           !Store.isQualified(clean.author, config.allowList)
@@ -284,7 +302,10 @@ export async function readPeerSnapshots({
         allNotes.push(clean);
       }
 
-      allPairs.push(...Store.sanitizeOutbox(parsed?.noteComments));
+      const peerPairs = Store.sanitizeOutbox(parsed?.noteComments)
+        .filter(entry => entry && isSafeSyncId(entry.noteId));
+
+      allPairs.push(...peerPairs);
     } catch {
       diagnostics.errors++;
     } finally {

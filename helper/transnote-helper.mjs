@@ -742,6 +742,31 @@ async function resolveAttachmentActionTarget(
   };
 }
 
+async function attachmentPreview(dataDir, config) {
+  const input = await readStdinJson();
+  const target = await resolveAttachmentActionTarget(
+    dataDir,
+    config,
+    input.noteId,
+    input.attachmentId
+  );
+
+  if (
+    target.attachment.kind !== 'image' ||
+    target.attachment.mime === 'image/svg+xml'
+  ) {
+    throw helperError(
+      'ATTACHMENT_NOT_PREVIEWABLE',
+      'only raster image attachments can be previewed'
+    );
+  }
+
+  return {
+    ok: true,
+    path: target.path,
+  };
+}
+
 async function attachmentOpen(dataDir, config) {
   const input = await readStdinJson();
   const target = await resolveAttachmentActionTarget(
@@ -1246,6 +1271,8 @@ try {
     result = await attachmentAdd(dataDir, config);
   else if (command === 'attachment-add-dialog')
     result = await attachmentAddDialog(dataDir, config);
+  else if (command === 'attachment-preview')
+    result = await attachmentPreview(dataDir, config);
   else if (command === 'attachment-open')
     result = await attachmentOpen(dataDir, config);
   else if (command === 'attachment-save')

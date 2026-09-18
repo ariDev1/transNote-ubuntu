@@ -287,6 +287,19 @@
   spacing: 8px;
 }
 
+.transnote-attachment-preview-button {
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.transnote-attachment-preview-button:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.transnote-attachment-preview {
+  icon-size: 180px;
+}
+
 .transnote-attachment-state {
   color: rgba(255, 255, 255, 0.66);
 }

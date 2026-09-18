@@ -42,3 +42,16 @@ export function attachmentStateLabel(state) {
 export function canUseAttachment(state) {
   return state === 'local' || state === 'verified';
 }
+
+export function canPreviewAttachment(attachment, state) {
+  if (!canUseAttachment(state))
+    return false;
+
+  if (attachment?.kind !== 'image')
+    return false;
+
+  const mime = String(attachment?.mime ?? '').toLowerCase();
+
+  return mime.startsWith('image/') &&
+    mime !== 'image/svg+xml';
+}

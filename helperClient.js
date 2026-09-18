@@ -18,6 +18,7 @@ const COMMANDS = new Set([
   'notes-unhide-all',
   'note-delete',
   'attachment-add-dialog',
+  'attachment-preview',
   'attachment-open',
   'attachment-save',
   'attachment-copy-text',
@@ -203,6 +204,20 @@ export class HelperClient {
       {noteId},
       cancellable
     );
+  }
+
+  async previewAttachment(
+    noteId,
+    attachmentId,
+    cancellable = null
+  ) {
+    const result = await this._run(
+      'attachment-preview',
+      {noteId, attachmentId},
+      cancellable
+    );
+
+    return String(result.path ?? '');
   }
 
   async openAttachment(noteId, attachmentId, cancellable = null) {

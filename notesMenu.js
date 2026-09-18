@@ -7,6 +7,7 @@ import {addQualifiedPeer, operatorLanErrorMessage} from './lanUiModel.js';
 import {
   attachmentStateFor,
   attachmentStateLabel,
+  canPreviewAttachment,
   canUseAttachment,
 } from './attachmentUiModel.js';
 import {advancePeerNoteKnowledge} from './unreadUiModel.js';
@@ -44,6 +45,8 @@ export class NotesMenuView {
     this._expandedNoteId = '';
     this._lastNotes = [];
     this._lastAttachmentStates = {};
+    this._attachmentPreviewPaths = new Map();
+    this._attachmentPreviewPending = new Set();
     this._busy = false;
     this._destroyed = false;
     this._refreshBusy = false;
@@ -749,6 +752,54 @@ export class NotesMenuView {
     );
   }
 
+  _attachmentPreviewKey(noteId, attachment) {
+    return JSON.stringify([
+      String(noteId ?? ''),
+      String(attachment?.id ?? ''),
+      String(attachment?.name ?? ''),
+      Number(attachment?.size ?? -1),
+      String(attachment?.sha256 ?? '').toLowerCase(),
+    ]);
+  }
+
+  _loadAttachmentPreview(noteId, attachment) {
+    const key = this._attachmentPreviewKey(noteId, attachment);
+
+    if (
+      this._destroyed ||
+      this._attachmentPreviewPaths.has(key) ||
+      this._attachmentPreviewPending.has(key)
+    ) {
+      return;
+    }
+
+    this._attachmentPreviewPending.add(key);
+
+    this._helper.previewAttachment(
+      noteId,
+      attachment.id,
+      this._cancellable
+    ).then(path => {
+      if (this._destroyed)
+        return;
+
+      const cleanPath = String(path ?? '').trim();
+      if (cleanPath === '')
+        return;
+
+      this._attachmentPreviewPaths.set(key, cleanPath);
+      this._applyNoteFilter();
+    }).catch(error => {
+      if (!this._destroyed && !this._cancellable.is_cancelled()) {
+        console.warn(
+          `TransNote image preview unavailable: ${error.message}`
+        );
+      }
+    }).finally(() => {
+      this._attachmentPreviewPending.delete(key);
+    });
+  }
+
   _updateNoteStatus(matchedCount, totalCount, query) {
     const matched = Number.isInteger(matchedCount)
       ? matchedCount
@@ -942,6 +993,45 @@ export class NotesMenuView {
           });
 
           const usable = canUseAttachment(state);
+
+          if (canPreviewAttachment(attachment, state)) {
+            const previewKey = this._attachmentPreviewKey(
+              note.id,
+              attachment
+            );
+            const previewPath =
+              this._attachmentPreviewPaths.get(previewKey) || '';
+
+            if (previewPath !== '') {
+              const previewButton = new St.Button({
+                can_focus: true,
+                reactive: true,
+                style_class: 'transnote-attachment-preview-button',
+              });
+
+              previewButton.set_child(new St.Icon({
+                gicon: Gio.FileIcon.new(
+                  Gio.File.new_for_path(previewPath)
+                ),
+                style_class: 'transnote-attachment-preview',
+              }));
+
+              previewButton.connect(
+                'clicked',
+                () => this._openAttachment(
+                  note.id,
+                  attachment.id
+                )
+              );
+
+              attachmentBox.add_child(previewButton);
+            } else {
+              this._loadAttachmentPreview(
+                note.id,
+                attachment
+              );
+            }
+          }
 
           const row = new St.BoxLayout({
             style_class: 'transnote-attachment-row',
@@ -2069,6 +2159,8 @@ export class NotesMenuView {
 
     this._destroyed = true;
     this._refreshPending = false;
+    this._attachmentPreviewPaths.clear();
+    this._attachmentPreviewPending.clear();
 
     if (this._pollId) {
       GLib.Source.remove(this._pollId);

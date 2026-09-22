@@ -1,0 +1,633 @@
+#!/usr/bin/env python3
+"""Restricted local CLI for TransNote on Ubuntu GNOME."""
+
+from __future__ import annotations
+
+import ast
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from agent.contract import (  # noqa: E402
+    PROTOCOL_VERSION,
+    capabilities,
+    has_provenance,
+    mark_provenance,
+    sanitize_provenance,
+    search_notes,
+    serialize_comment,
+    serialize_note,
+)
+
+
+SCHEMA = "org.gnome.shell.extensions.transnote"
+SETTING_KEYS = {
+    "deviceId": ("device-id", "TRANSNOTE_DEVICE_ID"),
+    "syncDir": ("sync-dir", "TRANSNOTE_SYNC_DIR"),
+    "allowList": ("allow-list", "TRANSNOTE_ALLOW_LIST"),
+}
+HELPER = ROOT / "helper" / "transnote-helper.mjs"
+SCHEMA_DIR = ROOT / "schemas"
+PROVENANCE_NAME = "agent-provenance.json"
+MAX_PROVENANCE_BYTES = 1024 * 1024
+COMMAND_TIMEOUT_SECONDS = 30
+
+EXIT_USAGE = 2
+EXIT_UNAVAILABLE = 3
+EXIT_DOMAIN = 4
+EXIT_PROTOCOL = 5
+
+
+class AgentFailure(Exception):
+    def __init__(self, code: str, message: str, exit_code: int):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.exit_code = exit_code
+
+
+class HelperFailure(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def emit(payload: dict[str, Any], exit_code: int = 0) -> None:
+    response = dict(payload)
+    response["protocolVersion"] = PROTOCOL_VERSION
+    print(json.dumps(response, separators=(",", ":"), ensure_ascii=False))
+    raise SystemExit(exit_code)
+
+
+def fail(code: str, message: str, exit_code: int) -> None:
+    raise AgentFailure(code, message, exit_code)
+
+
+def normalize(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def data_dir() -> Path:
+    override = normalize(os.environ.get("TRANSNOTE_DATA_DIR"))
+    if override:
+        return Path(override).expanduser()
+
+    xdg = normalize(os.environ.get("XDG_DATA_HOME"))
+    if xdg:
+        return Path(xdg).expanduser() / "transnote"
+
+    return Path.home() / ".local" / "share" / "transnote"
+
+
+def provenance_path() -> Path:
+    return data_dir() / PROVENANCE_NAME
+
+
+def load_provenance() -> dict[str, Any]:
+    path = provenance_path()
+    if not path.exists() and not path.is_symlink():
+        return sanitize_provenance(None)
+
+    if path.is_symlink():
+        fail(
+            "TRANSNOTE_NOT_READY",
+            "Agent provenance path is not a regular file",
+            EXIT_UNAVAILABLE,
+        )
+
+    try:
+        stat = path.stat()
+        if stat.st_size > MAX_PROVENANCE_BYTES:
+            fail(
+                "TRANSNOTE_NOT_READY",
+                "Agent provenance file is too large",
+                EXIT_UNAVAILABLE,
+            )
+        raw = path.read_text(encoding="utf-8")
+        parsed = json.loads(raw)
+    except AgentFailure:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        fail(
+            "TRANSNOTE_NOT_READY",
+            "Agent provenance file is not readable",
+            EXIT_UNAVAILABLE,
+        )
+
+    return sanitize_provenance(parsed)
+
+
+def save_provenance(value: Any) -> None:
+    path = provenance_path()
+    directory = path.parent
+    clean = sanitize_provenance(value)
+
+    try:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(directory, 0o700)
+
+        if path.is_symlink():
+            fail(
+                "TRANSNOTE_NOT_READY",
+                "Agent provenance path is not a regular file",
+                EXIT_UNAVAILABLE,
+            )
+
+        fd, temp_name = tempfile.mkstemp(
+            prefix=".agent-provenance.",
+            dir=directory,
+        )
+        temp_path = Path(temp_name)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(clean, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+            os.chmod(path, 0o600)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+    except AgentFailure:
+        raise
+    except OSError:
+        fail(
+            "TRANSNOTE_NOT_READY",
+            "Agent provenance file could not be saved",
+            EXIT_UNAVAILABLE,
+        )
+
+
+def run_process(argv: list[str], stdin: str | None = None, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            argv,
+            input=stdin,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=COMMAND_TIMEOUT_SECONDS,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        fail(
+            "TRANSNOTE_UNAVAILABLE",
+            "TransNote runtime is unavailable",
+            EXIT_UNAVAILABLE,
+        )
+
+
+def read_setting(key: str) -> str:
+    setting, env_key = SETTING_KEYS[key]
+    if env_key in os.environ:
+        return os.environ[env_key]
+
+    binary = normalize(os.environ.get("TRANSNOTE_GSETTINGS_BIN")) or "gsettings"
+    env = os.environ.copy()
+    env["GSETTINGS_SCHEMA_DIR"] = str(SCHEMA_DIR)
+
+    result = run_process(
+        [binary, "get", SCHEMA, setting],
+        env=env,
+    )
+    if result.returncode != 0:
+        fail(
+            "TRANSNOTE_UNAVAILABLE",
+            "TransNote settings are unavailable",
+            EXIT_UNAVAILABLE,
+        )
+
+    raw = result.stdout.strip()
+    try:
+        value = ast.literal_eval(raw)
+    except (SyntaxError, ValueError):
+        fail(
+            "PROTOCOL_ERROR",
+            "TransNote settings returned an invalid value",
+            EXIT_PROTOCOL,
+        )
+
+    if not isinstance(value, str):
+        fail(
+            "PROTOCOL_ERROR",
+            "TransNote settings returned an invalid value",
+            EXIT_PROTOCOL,
+        )
+
+    return value
+
+
+def load_config() -> dict[str, str]:
+    return {key: read_setting(key) for key in SETTING_KEYS}
+
+
+def helper_argv(command: str, config: dict[str, str]) -> list[str]:
+    node = normalize(os.environ.get("TRANSNOTE_NODE_BIN")) or "node"
+    return [
+        node,
+        str(HELPER),
+        command,
+        "--device-id",
+        config["deviceId"],
+        "--sync-dir",
+        config["syncDir"],
+        "--allow-list",
+        config["allowList"],
+    ]
+
+
+def decode_helper_json(raw: str) -> dict[str, Any]:
+    try:
+        value = json.loads(raw.strip())
+    except (TypeError, json.JSONDecodeError):
+        fail(
+            "PROTOCOL_ERROR",
+            "TransNote helper returned invalid JSON",
+            EXIT_PROTOCOL,
+        )
+
+    if not isinstance(value, dict):
+        fail(
+            "PROTOCOL_ERROR",
+            "TransNote helper returned an invalid response",
+            EXIT_PROTOCOL,
+        )
+    return value
+
+
+def call_helper(command: str, config: dict[str, str], input_value: dict[str, Any] | None = None) -> dict[str, Any]:
+    stdin = None if input_value is None else json.dumps(input_value)
+    result = run_process(helper_argv(command, config), stdin=stdin)
+
+    raw = result.stdout.strip() if result.returncode == 0 else result.stderr.strip()
+    if raw == "":
+        fail(
+            "TRANSNOTE_UNAVAILABLE",
+            "TransNote helper is unavailable",
+            EXIT_UNAVAILABLE,
+        )
+
+    payload = decode_helper_json(raw)
+    if result.returncode == 0 and payload.get("ok") is True:
+        return payload
+
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        fail(
+            "PROTOCOL_ERROR",
+            "TransNote helper returned an invalid error response",
+            EXIT_PROTOCOL,
+        )
+
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        fail(
+            "PROTOCOL_ERROR",
+            "TransNote helper returned an invalid error response",
+            EXIT_PROTOCOL,
+        )
+
+    raise HelperFailure(code, message)
+
+
+def helper_failure(error: HelperFailure, *, share: bool = False) -> None:
+    if error.code == "NOTE_NOT_FOUND":
+        fail("NOTE_NOT_FOUND", "note was not found", EXIT_DOMAIN)
+    if share and error.code == "NOT_OWNER":
+        fail(
+            "SHARE_NOT_ALLOWED",
+            "note is not eligible for agent sharing",
+            EXIT_DOMAIN,
+        )
+    if error.code == "BAD_INPUT":
+        fail("INVALID_ARGUMENT", error.message, EXIT_USAGE)
+
+    fail(
+        "PROTOCOL_ERROR",
+        f"TransNote helper error: {error.code}",
+        EXIT_PROTOCOL,
+    )
+
+
+def list_payload(config: dict[str, str]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    try:
+        payload = call_helper("notes-list", config)
+    except HelperFailure as error:
+        helper_failure(error)
+        raise AssertionError("unreachable")
+
+    raw_notes = payload.get("notes")
+    raw_local_ids = payload.get("localIds")
+    if not isinstance(raw_notes, list) or not isinstance(raw_local_ids, list):
+        fail(
+            "PROTOCOL_ERROR",
+            "TransNote helper returned an invalid note list",
+            EXIT_PROTOCOL,
+        )
+
+    local_ids = {normalize(note_id) for note_id in raw_local_ids}
+    notes: list[dict[str, Any]] = []
+    for raw_note in raw_notes:
+        if not isinstance(raw_note, dict):
+            continue
+        note_id = normalize(raw_note.get("id"))
+        source = "local" if note_id in local_ids else "lan"
+        clean = serialize_note(raw_note, source)
+        if clean is not None:
+            notes.append(clean)
+
+    return payload, notes
+
+
+def visible_note(notes: list[dict[str, Any]], note_id: str) -> dict[str, Any] | None:
+    clean_id = normalize(note_id)
+    for note in notes:
+        if note.get("id") == clean_id:
+            return note
+    return None
+
+
+def command_status() -> None:
+    config = load_config()
+    try:
+        local = call_helper("status", config)
+        _, notes = list_payload(config)
+        load_provenance()
+    except HelperFailure as error:
+        helper_failure(error)
+        return
+
+    local_count = local.get("noteCount")
+    if not isinstance(local_count, int) or local_count < 0:
+        fail(
+            "PROTOCOL_ERROR",
+            "TransNote helper returned an invalid status",
+            EXIT_PROTOCOL,
+        )
+
+    remote_count = sum(1 for note in notes if note.get("source") != "local")
+    emit({
+        "ok": True,
+        "status": {
+            "ready": True,
+            "identity": config["deviceId"],
+            "syncConfigured": normalize(config["syncDir"]) != "",
+            "localNoteCount": local_count,
+            "remoteNoteCount": remote_count,
+            "visibleNoteCount": len(notes),
+        },
+    })
+
+
+def command_list() -> None:
+    config = load_config()
+    _, notes = list_payload(config)
+    emit({"ok": True, "notes": notes})
+
+
+def command_get(note_id: str) -> None:
+    config = load_config()
+    _, notes = list_payload(config)
+    note = visible_note(notes, note_id)
+    if note is None:
+        fail("NOTE_NOT_FOUND", "note was not found", EXIT_DOMAIN)
+    emit({"ok": True, "note": note})
+
+
+def command_search(query: str) -> None:
+    clean_query = normalize(query)
+    if clean_query == "":
+        fail("INVALID_ARGUMENT", "search query cannot be empty", EXIT_USAGE)
+
+    config = load_config()
+    _, notes = list_payload(config)
+    emit({
+        "ok": True,
+        "query": clean_query,
+        "notes": search_notes(notes, clean_query),
+    })
+
+
+def command_create(title: str, body: str) -> None:
+    clean_title = normalize(title)
+    clean_body = normalize(body)
+    if clean_title == "" and clean_body == "":
+        fail("EMPTY_NOTE", "title and body cannot both be empty", EXIT_USAGE)
+
+    provenance = load_provenance()
+    config = load_config()
+    try:
+        payload = call_helper(
+            "note-create",
+            config,
+            {"title": clean_title, "body": clean_body},
+        )
+    except HelperFailure as error:
+        helper_failure(error)
+        return
+
+    note = serialize_note(payload.get("note"), "local")
+    if note is None or normalize(note.get("id")) == "":
+        fail(
+            "PROTOCOL_ERROR",
+            "TransNote helper returned an invalid note",
+            EXIT_PROTOCOL,
+        )
+
+    provenance = mark_provenance(provenance, "note", note["id"])
+    save_provenance(provenance)
+    emit({"ok": True, "note": note})
+
+
+def command_comment(note_id: str, comment_text: str) -> None:
+    clean_id = normalize(note_id)
+    clean_text = normalize(comment_text)
+    if clean_id == "":
+        fail("MISSING_ARGUMENT", "missing note id", EXIT_USAGE)
+    if clean_text == "":
+        fail("EMPTY_COMMENT", "comment cannot be empty", EXIT_USAGE)
+
+    provenance = load_provenance()
+    config = load_config()
+    _, notes = list_payload(config)
+    if visible_note(notes, clean_id) is None:
+        fail("NOTE_NOT_FOUND", "note was not found", EXIT_DOMAIN)
+
+    try:
+        payload = call_helper(
+            "comment-add",
+            config,
+            {"noteId": clean_id, "text": clean_text},
+        )
+    except HelperFailure as error:
+        helper_failure(error)
+        return
+
+    comment = serialize_comment(payload.get("comment"))
+    if comment is None or normalize(comment.get("id")) == "":
+        fail(
+            "PROTOCOL_ERROR",
+            "TransNote helper returned an invalid comment",
+            EXIT_PROTOCOL,
+        )
+
+    provenance = mark_provenance(provenance, "comment", comment["id"])
+    save_provenance(provenance)
+    emit({
+        "ok": True,
+        "noteId": clean_id,
+        "comment": comment,
+    })
+
+
+def command_share(note_id: str) -> None:
+    clean_id = normalize(note_id)
+    if clean_id == "":
+        fail("MISSING_ARGUMENT", "missing note id", EXIT_USAGE)
+
+    provenance = load_provenance()
+    config = load_config()
+    _, notes = list_payload(config)
+    note = visible_note(notes, clean_id)
+    if note is None:
+        fail("NOTE_NOT_FOUND", "note was not found", EXIT_DOMAIN)
+
+    if note.get("source") != "local" or not has_provenance(
+        provenance,
+        "note",
+        clean_id,
+    ):
+        fail(
+            "SHARE_NOT_ALLOWED",
+            "note is not eligible for agent sharing",
+            EXIT_DOMAIN,
+        )
+
+    try:
+        payload = call_helper(
+            "note-share",
+            config,
+            {"id": clean_id, "shared": True},
+        )
+    except HelperFailure as error:
+        helper_failure(error, share=True)
+        return
+
+    shared_note = serialize_note(payload.get("note"), "local")
+    if shared_note is None:
+        fail(
+            "PROTOCOL_ERROR",
+            "TransNote helper returned an invalid note",
+            EXIT_PROTOCOL,
+        )
+
+    emit({"ok": True, "note": shared_note})
+
+
+def parse_create(args: list[str]) -> tuple[str, str]:
+    title = ""
+    body = ""
+    seen: set[str] = set()
+    index = 0
+
+    while index < len(args):
+        option = args[index]
+        if option not in {"--title", "--body"}:
+            fail("UNKNOWN_OPTION", f"unknown option: {option}", EXIT_USAGE)
+        if option in seen:
+            fail("INVALID_ARGUMENT", f"duplicate option: {option}", EXIT_USAGE)
+        if index + 1 >= len(args):
+            fail("MISSING_ARGUMENT", f"missing value for {option}", EXIT_USAGE)
+
+        seen.add(option)
+        value = args[index + 1]
+        if option == "--title":
+            title = value
+        else:
+            body = value
+        index += 2
+
+    return title, body
+
+
+def parse_comment(args: list[str]) -> tuple[str, str]:
+    if not args:
+        fail("MISSING_ARGUMENT", "missing note id", EXIT_USAGE)
+    note_id = args[0]
+    if len(args) != 3:
+        fail("MISSING_ARGUMENT", "comment requires --text", EXIT_USAGE)
+    if args[1] != "--text":
+        fail("UNKNOWN_OPTION", f"unknown option: {args[1]}", EXIT_USAGE)
+    return note_id, args[2]
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    if not args:
+        fail("MISSING_ARGUMENT", "missing command", EXIT_USAGE)
+
+    command = args[0]
+    rest = args[1:]
+
+    if command == "status":
+        if rest:
+            fail("INVALID_ARGUMENT", "status takes no arguments", EXIT_USAGE)
+        command_status()
+    elif command == "capabilities":
+        if rest:
+            fail("INVALID_ARGUMENT", "capabilities takes no arguments", EXIT_USAGE)
+        emit({"ok": True, "capabilities": capabilities()})
+    elif command == "list":
+        if rest:
+            fail("INVALID_ARGUMENT", "list takes no arguments", EXIT_USAGE)
+        command_list()
+    elif command == "get":
+        if len(rest) != 1 or normalize(rest[0]) == "":
+            fail("MISSING_ARGUMENT", "get requires one note id", EXIT_USAGE)
+        command_get(rest[0])
+    elif command == "search":
+        if len(rest) != 1:
+            fail("MISSING_ARGUMENT", "search requires one query", EXIT_USAGE)
+        command_search(rest[0])
+    elif command == "create":
+        title, body = parse_create(rest)
+        command_create(title, body)
+    elif command == "comment":
+        note_id, comment_text = parse_comment(rest)
+        command_comment(note_id, comment_text)
+    elif command == "share":
+        if len(rest) != 1 or normalize(rest[0]) == "":
+            fail("MISSING_ARGUMENT", "share requires one note id", EXIT_USAGE)
+        command_share(rest[0])
+    else:
+        fail("UNKNOWN_COMMAND", f"unknown command: {command}", EXIT_USAGE)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except AgentFailure as error:
+        emit(
+            {
+                "ok": False,
+                "error": {
+                    "code": error.code,
+                    "message": error.message,
+                },
+            },
+            error.exit_code,
+        )

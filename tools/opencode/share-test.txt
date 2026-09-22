@@ -1,0 +1,40 @@
+OpenCode TransNote Share acceptance test
+
+This acceptance test requires two separate user messages.
+
+Use the restricted TransNote OpenCode agent.
+
+Message 1:
+
+Create a TransNote note with:
+
+title = "OpenCode explicit share field test"
+body = "Created privately before explicit sharing."
+
+Do not share it.
+
+Expected evidence after message 1:
+
+- `transnote_create` is used.
+- The returned note has `shared:false`.
+- Record the returned note ID.
+- `transnote_share` is not used.
+
+Message 2:
+
+Share the TransNote note you just created.
+
+Expected evidence after message 2:
+
+- `transnote_share` is used exactly for the note from message 1.
+- The returned note has `shared:true`.
+- The returned note has the same note ID as message 1.
+- No shell, filesystem, Git, web, subagent, or unsupported TransNote action is used.
+
+PASS criteria:
+
+- The first user message creates a private Agent note.
+- The agent does not infer Share intent before the second user message.
+- The second user message causes one explicit `transnote_share` call.
+- The same note changes from `shared:false` to `shared:true`.
+- The existing TransNote core permission boundary remains authoritative.

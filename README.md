@@ -168,6 +168,107 @@ Ubuntu project:
 
 https://github.com/ariDev1/transNote-ubuntu
 
+## Agent interface
+
+TransNote includes an optional restricted local Agent CLI:
+
+```text
+~/.local/bin/transnote-agent
+```
+
+Install it explicitly from the repository:
+
+```bash
+./tools/install-agent-cli.sh
+```
+
+The Agent protocol exposes only:
+
+```text
+status
+capabilities
+list
+get
+search
+create
+comment
+share
+```
+
+Agent-created notes are private by default. `share` is allowed only for a
+visible local note that was created through the restricted Agent interface.
+Delete, unshare, hide, pairing, sync administration, attachment mutation,
+arbitrary filesystem access, command forwarding, and identity override are
+not exposed.
+
+Agent provenance is local-only. It is not written into shared TransNote
+snapshots.
+
+Remove the CLI with:
+
+```bash
+./tools/uninstall-agent-cli.sh
+```
+
+### OpenCode adapter
+
+TransNote includes an optional restricted OpenCode adapter under:
+
+```text
+tools/opencode/
+```
+
+The adapter exposes only these dedicated custom tools:
+
+```text
+transnote_status
+transnote_list
+transnote_search
+transnote_create
+transnote_comment
+transnote_share
+```
+
+The OpenCode profile denies all other capabilities by default. General shell
+access, filesystem tools, Git, web access, and subagents remain denied.
+
+Install the adapter explicitly:
+
+```bash
+./tools/opencode/install.sh
+```
+
+The adapter supports the OpenCode V1 permission model. An unknown major
+version fails closed. A new or changed OpenCode version is not trusted until
+the permission-boundary acceptance test passes.
+
+Run the non-mutating test in `tools/opencode/security-test.txt` with the
+restricted `Transnote` agent. Verify that the OpenCode footer still shows
+`Transnote` before the test. If it shows another agent such as `Build`, stop
+the test and select `Transnote`.
+
+After the permission-boundary test passes, run the separate explicit-share
+test in `tools/opencode/share-test.txt`. It uses two user messages: the first
+creates a private Agent note, and the second explicitly requests sharing.
+
+After both field tests pass, record the exact tested OpenCode version:
+
+```bash
+./tools/opencode/mark-tested.sh --accept-security-test
+```
+
+Then start the restricted agent through:
+
+```bash
+./tools/opencode/run.sh
+```
+
+Remove the adapter with:
+
+```bash
+./tools/opencode/uninstall.sh
+```
+
 ## Development
 
 - `main` is the verified release baseline.

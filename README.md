@@ -10,11 +10,11 @@ The Ubuntu port keeps the existing TransNote note model and compatible folder-sy
 
 ## Current release
 
-- TransNote 0.6.0
+- TransNote 0.7.0
 - GNOME Shell 46 and 50
 - Extension UUID: `transnote@aridev1`
-- Extension version: `7`
-- Footer build information: `0.6.0 · <revision> · GitHub`
+- Extension version: `8`
+- Footer build information: `0.7.0 · <revision> · GitHub`
 - Ubuntu ↔ Ubuntu device sync supported
 - Ubuntu ↔ Omarchy folder sync supported
 
@@ -24,9 +24,11 @@ The Ubuntu port keeps the existing TransNote note model and compatible folder-sy
 - Copy and delete notes
 - Share and unshare notes
 - Comments
-- Attachments
+- Attachments, including verified image previews
 - Note background colors
 - Compact expandable note cards
+- Switchable List and two-column Grid views, with opened notes shown above their selected grid row
+- Notes viewport height adapts to the display size
 - Contextual note search by title, body, and author
 - Red unread indicator for new peer notes and comments
 - Automatic peer polling
@@ -65,7 +67,7 @@ systemctl --user enable --now syncthing.service
 ```bash
 mkdir -p ~/.local/share/gnome-shell/extensions
 
-git clone \
+git clone --branch main --single-branch \
   https://github.com/ariDev1/transNote-ubuntu.git \
   ~/.local/share/gnome-shell/extensions/transnote@aridev1
 
@@ -78,20 +80,45 @@ gnome-extensions enable transnote@aridev1
 
 The local `.transnote-revision` file supplies the short Git revision shown in the footer. It is not committed to the repository.
 
-If GNOME does not detect the extension immediately, log out and log in again.
+If GNOME does not detect the extension immediately, enable it with:
+
+```bash
+gnome-extensions enable transnote@aridev1
+```
+
+On X11, press **Alt+F2**, type `r`, and press Enter to reload GNOME Shell
+without logging out. On Wayland, toggle the extension in Extensions, or run:
+
+```bash
+gnome-extensions disable transnote@aridev1
+gnome-extensions enable transnote@aridev1
+```
+
+Logging out should be a last resort if GNOME cannot discover the extension
+files.
 
 ## Updating
 
 ```bash
 EXTENSION_DIR="$HOME/.local/share/gnome-shell/extensions/transnote@aridev1"
 
-git -C "$EXTENSION_DIR" pull --ff-only
-
+git -C "$EXTENSION_DIR" fetch origin main
+git -C "$EXTENSION_DIR" switch main
+git -C "$EXTENSION_DIR" pull --ff-only origin main
 git -C "$EXTENSION_DIR" rev-parse --short=8 HEAD \
   > "$EXTENSION_DIR/.transnote-revision"
+
+# Reload without ending your desktop session:
+gnome-extensions disable transnote@aridev1
+gnome-extensions enable transnote@aridev1
 ```
 
-After an update, log out and log in again if GNOME Shell does not reload the extension.
+The branch switch also moves existing installations from `development` to the
+release branch. If the working tree has local edits, commit or back them up
+before switching.
+
+On X11, **Alt+F2**, then `r`, also reloads GNOME Shell. The notes viewport
+adapts to the primary display height.
 
 ## Device sync setup
 

@@ -96,6 +96,15 @@ At least one pairing run must exercise each state.
 - [ ] Confirm that the comment appears on the other computer.
 - [ ] Confirm repeated polling does not duplicate the comment.
 
+### Notes views and responsive sizing
+
+- [ ] Switch between **List** and **Grid**; confirm both display all filtered notes.
+- [ ] Confirm Grid uses two columns without overlapping cards or controls.
+- [ ] Open a note in the lower grid rows; confirm its details appear immediately above its selected tile row and the view does not jump to the top.
+- [ ] Confirm image previews remain inside the opened note card and do not overlap neighboring grid tiles.
+- [ ] Check the popup on each supported display scale/resolution; confirm the notes viewport adapts and remains scrollable without clipping the controls or footer.
+- [ ] Confirm List remains available and usable after switching to Grid and back.
+
 ### Attachments
 
 - [ ] Add an attachment to a shared note.

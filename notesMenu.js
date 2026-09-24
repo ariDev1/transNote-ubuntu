@@ -19,6 +19,23 @@ import {
 
 const POLL_SECONDS = 15;
 
+function notesViewportMaxHeight() {
+  let monitorHeight = 900;
+
+  try {
+    const monitor = global.display.get_primary_monitor();
+    const geometry = global.display.get_monitor_geometry(monitor);
+    if (Number.isFinite(geometry?.height) && geometry.height > 0)
+      monitorHeight = geometry.height;
+  } catch {
+    // Keep a usable fallback if monitor geometry is unavailable.
+  }
+
+  const target = Math.floor(monitorHeight * 0.75 - 175);
+  const available = Math.floor(monitorHeight - 220);
+  return Math.max(120, Math.min(target, available));
+}
+
 export class NotesMenuView {
   constructor({
     helper,
@@ -43,6 +60,7 @@ export class NotesMenuView {
     this._knownPeerCommentIds = new Set();
     this._peerNotesPrimed = false;
     this._expandedNoteId = '';
+    this._viewMode = 'list';
     this._lastNotes = [];
     this._lastAttachmentStates = {};
     this._attachmentPreviewPaths = new Map();
@@ -223,9 +241,28 @@ export class NotesMenuView {
       style_class: 'transnote-status',
     });
 
-    const statusRow = new St.BoxLayout();
+    const statusRow = new St.BoxLayout({
+      style_class: 'transnote-status-row',
+    });
     statusRow.add_child(this._status);
     statusRow.add_child(new St.Widget({x_expand: true}));
+
+    this._listViewButton = new St.Button({
+      label: 'List',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-layout-button transnote-layout-active',
+    });
+    this._gridViewButton = new St.Button({
+      label: 'Grid',
+      can_focus: true,
+      reactive: true,
+      style_class: 'button transnote-layout-button',
+    });
+    this._listViewButton.connect('clicked', () => this._setViewMode('list'));
+    this._gridViewButton.connect('clicked', () => this._setViewMode('grid'));
+    statusRow.add_child(this._listViewButton);
+    statusRow.add_child(this._gridViewButton);
 
     this._unhideAllButton = new St.Button({
       label: 'Unhide all',
@@ -243,12 +280,16 @@ export class NotesMenuView {
     this._notesBox = new St.BoxLayout({
       vertical: true,
       style_class: 'transnote-section',
+      x_expand: true,
     });
 
     this._scrollView = new St.ScrollView({
       style_class: 'transnote-scroll',
       overlay_scrollbars: false,
     });
+    this._scrollView.set_style(
+      `max-height: ${notesViewportMaxHeight()}px;`
+    );
     this._scrollView.set_policy(
       St.PolicyType.NEVER,
       St.PolicyType.AUTOMATIC
@@ -818,6 +859,21 @@ export class NotesMenuView {
       `${total} note${total === 1 ? '' : 's'}`;
   }
 
+  _setViewMode(mode) {
+    const nextMode = mode === 'grid' ? 'grid' : 'list';
+    if (this._viewMode === nextMode)
+      return;
+
+    this._viewMode = nextMode;
+    this._listViewButton?.set_style_class_name(
+      `button transnote-layout-button${nextMode === 'list' ? ' transnote-layout-active' : ''}`
+    );
+    this._gridViewButton?.set_style_class_name(
+      `button transnote-layout-button${nextMode === 'grid' ? ' transnote-layout-active' : ''}`
+    );
+    this._applyNoteFilter();
+  }
+
   _renderNotes(notes, attachmentStates = {}, emptyMessage = 'No notes yet.') {
     for (const child of this._notesBox.get_children())
       child.destroy();
@@ -840,6 +896,22 @@ export class NotesMenuView {
       this._expandedNoteId = '';
 
     const deviceId = this._settings.get_string('device-id').trim();
+    const gridRows = [];
+    let gridIndex = 0;
+    const addGridTile = tile => {
+      if (gridIndex % 2 === 0) {
+        const row = new St.BoxLayout({
+          style_class: 'transnote-grid-row',
+          x_expand: true,
+        });
+        gridRows.push(row);
+        this._notesBox.add_child(row);
+      }
+
+      tile.x_expand = true;
+      gridRows[Math.floor(gridIndex / 2)].add_child(tile);
+      gridIndex++;
+    };
 
     for (const note of notes) {
       const noteId = String(note.id ?? '').trim();
@@ -856,7 +928,7 @@ export class NotesMenuView {
         reactive: true,
         track_hover: true,
         style_class:
-          `transnote-note${noteColorClass}${expandedClass}`,
+          `transnote-note${this._viewMode === 'grid' && !expanded ? ' transnote-note-grid' : ''}${noteColorClass}${expandedClass}`,
       });
 
       const header = new St.BoxLayout({
@@ -963,7 +1035,11 @@ export class NotesMenuView {
           }));
         }
 
-        this._notesBox.add_child(box);
+        if (this._viewMode === 'grid') {
+          addGridTile(box);
+        } else {
+          this._notesBox.add_child(box);
+        }
         continue;
       }
 
@@ -1264,8 +1340,82 @@ export class NotesMenuView {
       }
 
       box.add_child(actions);
-      this._notesBox.add_child(box);
+      if (this._viewMode === 'grid') {
+        if (gridIndex % 2 === 0) {
+          this._notesBox.add_child(box);
+        } else {
+          const row = gridRows[Math.floor(gridIndex / 2)];
+          const rowPosition = this._notesBox.get_children().indexOf(row);
+          this._notesBox.insert_child_at_index(box, rowPosition);
+        }
+        addGridTile(this._createGridTile(note));
+      } else {
+        box.x_expand = true;
+        this._notesBox.add_child(box);
+      }
     }
+
+    if (this._viewMode === 'grid' && gridIndex % 2 === 1)
+      gridRows[gridRows.length - 1].add_child(new St.Widget({x_expand: true}));
+  }
+
+  _createGridTile(note) {
+    const noteId = String(note?.id ?? '').trim();
+    const tile = new St.BoxLayout({
+      vertical: true,
+      reactive: true,
+      track_hover: true,
+      style_class: `transnote-note transnote-note-grid${note?.color ? ` transnote-note-color-${note.color}` : ''} transnote-note-expanded`,
+    });
+    const toggle = new St.Button({
+      can_focus: true,
+      reactive: true,
+      x_expand: true,
+      style_class: 'transnote-note-toggle',
+    });
+    const title = new St.Label({
+      text: `▾  ${String(note?.title || 'Untitled')}`,
+      x_expand: true,
+      style_class: 'transnote-note-title',
+    });
+    title.clutter_text.line_wrap = true;
+    title.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+    toggle.set_child(title);
+    toggle.connect('clicked', () => this._toggleNoteExpanded(noteId));
+    tile.add_child(toggle);
+
+    const author = String(note?.author || '').trim();
+    if (author !== '') {
+      tile.add_child(new St.Label({
+        text: `from ${author}`,
+        style_class: 'transnote-note-meta',
+      }));
+    }
+
+    const previewText = compactNotePreview(note?.body);
+    if (previewText !== '') {
+      const preview = new St.Label({
+        text: previewText,
+        x_expand: true,
+        style_class: 'transnote-note-preview',
+      });
+      preview.clutter_text.line_wrap = true;
+      preview.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+      tile.add_child(preview);
+    }
+
+    const summaryText = compactNoteSummary({
+      comments: Array.isArray(note?.comments) ? note.comments : [],
+      attachments: Array.isArray(note?.attachments) ? note.attachments : [],
+    });
+    if (summaryText !== '') {
+      tile.add_child(new St.Label({
+        text: summaryText,
+        style_class: 'transnote-note-summary',
+      }));
+    }
+
+    return tile;
   }
 
   _toggleNoteExpanded(noteId) {
@@ -2172,6 +2322,8 @@ export class NotesMenuView {
     this._settings = null;
     this._status = null;
     this._notesBox = null;
+    this._listViewButton = null;
+    this._gridViewButton = null;
     this._scrollView = null;
     this._titleEntry = null;
     this._bodyEntry = null;

@@ -13,16 +13,12 @@ class FooterMetadataTests(unittest.TestCase):
         self.assertEqual(metadata["version"], 8)
         self.assertEqual(metadata["version-name"], "0.7.0")
 
-    def test_readme_reports_current_release(self):
+    def test_readme_describes_user_features(self):
         source = (ROOT / "README.md").read_text()
 
-        self.assertIn("- TransNote 0.7.0", source)
-        self.assertIn("- Extension version: `8`", source)
-        self.assertIn(
-            "- Footer build information: `0.7.0 · <revision> · GitHub`",
-            source,
-        )
         self.assertIn("- Compact expandable note cards", source)
+        self.assertIn("Switch between List and two-column Grid views", source)
+        self.assertIn("Popup height adapts to the display", source)
         self.assertIn(
             "- Contextual note search by title, body, and author",
             source,

@@ -52,15 +52,18 @@ class ReleaseBaselineTests(unittest.TestCase):
             "https://github.com/ariDev1/transNote-ubuntu",
         )
 
-    def test_readme_identifies_release_version_8(self):
+    def test_readme_has_user_facing_features_and_install_instructions(self):
         readme = (ROOT / "README.md").read_text()
 
         for text in (
-            "- TransNote 0.7.0",
-            "- Extension version: `8`",
-            "- Footer build information: `0.7.0 · <revision> · GitHub`",
+            "Switch between List and two-column Grid views",
+            "## Installation",
+            "git clone --branch main --single-branch",
+            "## Device sync setup",
         ):
             self.assertIn(text, readme)
+
+        self.assertNotIn("## Development", readme)
 
     def test_required_runtime_files_exist(self):
         missing = [

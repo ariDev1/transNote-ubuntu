@@ -399,27 +399,16 @@ class OpenCodeAdapterTests(unittest.TestCase):
             with self.subTest(required=required):
                 self.assertIn(required, text)
 
-    def test_readme_documents_restricted_opencode_adapter(self):
+    def test_readme_documents_optional_opencode_adapter(self):
         text = README.read_text(encoding="utf-8")
 
         for required in (
-            "## Agent interface",
-            "transnote-agent",
-            "### OpenCode adapter",
-            "transnote_status",
-            "transnote_list",
-            "transnote_search",
-            "transnote_create",
-            "transnote_comment",
-            "transnote_share",
             "./tools/opencode/install.sh",
-            "tools/opencode/security-test.txt",
-            "tools/opencode/share-test.txt",
-            "restricted `Transnote` agent",
-            "footer still shows",
-            "./tools/opencode/mark-tested.sh --accept-security-test",
             "./tools/opencode/run.sh",
-            "Agent provenance is local-only",
+            "./tools/opencode/uninstall.sh",
+            "Agent-created notes are private unless sharing is explicitly requested.",
+            "dedicated TransNote tools",
+            "general shell",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, text)
